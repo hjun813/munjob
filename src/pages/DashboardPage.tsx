@@ -136,7 +136,7 @@ export function DashboardPage() {
           <div className="flex flex-wrap items-center gap-3 shrink-0">
             <Button
               size="lg"
-              onClick={() => navigate('/')}
+              onClick={() => navigate('/studio')}
               className="bg-blue-600 hover:bg-blue-700 text-white font-semibold"
             >
               <Play className="h-4 w-4 fill-current" />
@@ -145,17 +145,17 @@ export function DashboardPage() {
             <Button
               size="lg"
               variant="outline"
-              onClick={() => navigate('/setup')}
+              onClick={() => navigate('/guide')}
             >
               <Video className="h-4 w-4 text-blue-600" />
-              <span>상세 면접 설정</span>
+              <span>사용 가이드</span>
             </Button>
           </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-6 pt-6 border-t border-slate-100">
           <Link
-            to="/"
+            to="/studio"
             className="group flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-3 hover:border-blue-300 hover:bg-blue-50/40 transition-all"
           >
             <div className="flex items-center gap-3">
@@ -296,7 +296,7 @@ export function DashboardPage() {
                 <Button
                   size="sm"
                   className="mt-4 bg-blue-600 hover:bg-blue-700 text-white"
-                  onClick={() => navigate('/')}
+                  onClick={() => navigate('/studio')}
                 >
                   <Play className="h-3.5 w-3.5" />
                   <span>연습실에서 첫 녹화 시작하기</span>

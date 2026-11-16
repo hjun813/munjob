@@ -499,8 +499,8 @@ export function PracticeRecordsPage() {
                   onClick={() =>
                     navigate(
                       activeQuestion
-                        ? `/?questionId=${activeQuestion.id}`
-                        : '/'
+                        ? `/studio?questionId=${activeQuestion.id}`
+                        : '/studio'
                     )
                   }
                   className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 px-4 py-2 text-xs font-semibold text-slate-700 shadow-2xs transition-colors"

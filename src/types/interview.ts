@@ -83,3 +83,14 @@ export interface SelfFeedback {
   improvements: string;
   updatedAt: string;
 }
+
+export interface User {
+  id: string;
+  email: string;
+  passwordHash: string;
+  name: string;
+  targetRole: string;
+  bio?: string;
+  createdAt: string;
+}
+

@@ -23,6 +23,14 @@ import {
   Clock,
   AlertTriangle,
   CheckCircle2,
+  UserCheck,
+  Camera,
+  Volume2,
+  VolumeX,
+  Upload,
+  RotateCcw,
+  Sparkles,
+  SkipForward,
 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '@/db/database';
@@ -35,6 +43,112 @@ import { QuickQuestionModal } from '@/components/questions/QuickQuestionModal';
 import { formatDuration, getSupportedMimeType } from '@/lib/utils';
 
 type RecordStage = 'idle' | 'prep' | 'recording' | 'paused' | 'saving' | 'saved';
+type StudioMode = 'self' | 'interviewer';
+
+interface InterviewerPersona {
+  id: string;
+  name: string;
+  role: string;
+  badge: string;
+  description: string;
+  accentColor: string;
+  voicePitch: number;
+  voiceRate: number;
+}
+
+const INTERVIEWER_PERSONAS: InterviewerPersona[] = [
+  {
+    id: 'tech-lead',
+    name: '김현우 팀장',
+    role: '백엔드 수석 면접관 (Tech Lead)',
+    badge: '실무·기술 면접',
+    description: '핵심 원리와 트레이드오프, 실무 문제 해결 경험을 중점적으로 확인합니다.',
+    accentColor: 'blue',
+    voicePitch: 0.95,
+    voiceRate: 1.02,
+  },
+  {
+    id: 'hr-director',
+    name: '박서연 수석',
+    role: '피플팀 리드 (Culture & HR)',
+    badge: '컬처핏·인성 면접',
+    description: '협업 커뮤니케이션 방식과 지원 동기, 성장 가능성을 주의 깊게 듣습니다.',
+    accentColor: 'emerald',
+    voicePitch: 1.08,
+    voiceRate: 1.0,
+  },
+];
+
+const CUSTOM_VIDEO_DB_NAME = 'InterviewLabCustomAssets';
+const CUSTOM_VIDEO_STORE = 'interviewerVideos';
+const CUSTOM_VIDEO_KEY = 'custom_interviewer_loop';
+
+async function saveCustomInterviewerVideo(blob: Blob | null): Promise<void> {
+  return new Promise((resolve) => {
+    try {
+      const req = indexedDB.open(CUSTOM_VIDEO_DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const idb = req.result;
+        if (!idb.objectStoreNames.contains(CUSTOM_VIDEO_STORE)) {
+          idb.createObjectStore(CUSTOM_VIDEO_STORE);
+        }
+      };
+      req.onsuccess = () => {
+        const idb = req.result;
+        const tx = idb.transaction(CUSTOM_VIDEO_STORE, 'readwrite');
+        const store = tx.objectStore(CUSTOM_VIDEO_STORE);
+        if (blob) {
+          store.put(blob, CUSTOM_VIDEO_KEY);
+        } else {
+          store.delete(CUSTOM_VIDEO_KEY);
+        }
+        tx.oncomplete = () => {
+          idb.close();
+          resolve();
+        };
+        tx.onerror = () => {
+          idb.close();
+          resolve();
+        };
+      };
+      req.onerror = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
+async function loadCustomInterviewerVideo(): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    try {
+      const req = indexedDB.open(CUSTOM_VIDEO_DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const idb = req.result;
+        if (!idb.objectStoreNames.contains(CUSTOM_VIDEO_STORE)) {
+          idb.createObjectStore(CUSTOM_VIDEO_STORE);
+        }
+      };
+      req.onsuccess = () => {
+        const idb = req.result;
+        const tx = idb.transaction(CUSTOM_VIDEO_STORE, 'readonly');
+        const store = tx.objectStore(CUSTOM_VIDEO_STORE);
+        const getReq = store.get(CUSTOM_VIDEO_KEY);
+        getReq.onsuccess = () => {
+          const result = getReq.result instanceof Blob ? getReq.result : null;
+          idb.close();
+          resolve(result);
+        };
+        getReq.onerror = () => {
+          idb.close();
+          resolve(null);
+        };
+      };
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
 
 export function PracticeStudioPage() {
   const navigate = useNavigate();
@@ -94,7 +208,22 @@ export function PracticeStudioPage() {
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const [activeSessionId, setActiveSessionId] = useState<string>('');
 
+  const [studioMode, setStudioMode] = useState<StudioMode>(() => {
+    const saved = localStorage.getItem('interview_lab_studio_mode');
+    return saved === 'interviewer' ? 'interviewer' : 'self';
+  });
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string>(
+    INTERVIEWER_PERSONAS[0].id
+  );
+  const [ttsEnabled, setTtsEnabled] = useState<boolean>(true);
+  const [isInterviewerSpeaking, setIsInterviewerSpeaking] =
+    useState<boolean>(false);
+  const [customVideoUrl, setCustomVideoUrl] = useState<string | null>(null);
+  const [listeningCueIndex, setListeningCueIndex] = useState<number>(0);
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const interviewerVideoRef = useRef<HTMLVideoElement | null>(null);
+  const customVideoInputRef = useRef<HTMLInputElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -103,6 +232,144 @@ export function PracticeStudioPage() {
   const stopResolveRef = useRef<(() => void) | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const animFrameRef = useRef<number | null>(null);
+  const speechProceedRef = useRef<(() => void) | null>(null);
+
+  const activePersona = useMemo(
+    () =>
+      INTERVIEWER_PERSONAS.find((p) => p.id === selectedPersonaId) ||
+      INTERVIEWER_PERSONAS[0],
+    [selectedPersonaId]
+  );
+
+  const handleChangeStudioMode = (mode: StudioMode) => {
+    setStudioMode(mode);
+    try {
+      localStorage.setItem('interview_lab_studio_mode', mode);
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    let revokeUrl: string | null = null;
+    loadCustomInterviewerVideo().then((blob) => {
+      if (blob) {
+        revokeUrl = URL.createObjectURL(blob);
+        setCustomVideoUrl(revokeUrl);
+      }
+    });
+    return () => {
+      if (revokeUrl) URL.revokeObjectURL(revokeUrl);
+    };
+  }, []);
+
+  const handleUploadCustomVideo = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await saveCustomInterviewerVideo(file);
+    setCustomVideoUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(file);
+    });
+    e.target.value = '';
+  };
+
+  const handleResetCustomVideo = async () => {
+    await saveCustomInterviewerVideo(null);
+    setCustomVideoUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+  };
+
+  const stopSpeaking = useCallback(() => {
+    speechProceedRef.current = null;
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        // ignore
+      }
+    }
+    setIsInterviewerSpeaking(false);
+  }, []);
+
+  const speakQuestionText = useCallback(
+    (text: string, onComplete?: () => void) => {
+      if (
+        typeof window === 'undefined' ||
+        !('speechSynthesis' in window) ||
+        !text.trim()
+      ) {
+        onComplete?.();
+        return;
+      }
+
+      try {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'ko-KR';
+        utterance.pitch = activePersona.voicePitch;
+        utterance.rate = activePersona.voiceRate;
+
+        const voices = window.speechSynthesis.getVoices();
+        const koVoice = voices.find((v) => v.lang.includes('ko'));
+        if (koVoice) {
+          utterance.voice = koVoice;
+        }
+
+        let finished = false;
+        const finishOnce = () => {
+          if (finished) return;
+          finished = true;
+          speechProceedRef.current = null;
+          setIsInterviewerSpeaking(false);
+          onComplete?.();
+        };
+
+        speechProceedRef.current = () => {
+          try {
+            window.speechSynthesis.cancel();
+          } catch {
+            // ignore
+          }
+          finishOnce();
+        };
+
+        utterance.onstart = () => {
+          setIsInterviewerSpeaking(true);
+        };
+        utterance.onend = finishOnce;
+        utterance.onerror = finishOnce;
+
+        setIsInterviewerSpeaking(true);
+        window.speechSynthesis.speak(utterance);
+      } catch {
+        setIsInterviewerSpeaking(false);
+        onComplete?.();
+      }
+    },
+    [activePersona]
+  );
+
+  useEffect(() => {
+    return () => {
+      stopSpeaking();
+    };
+  }, [stopSpeaking]);
+
+  useEffect(() => {
+    if (stage !== 'recording') {
+      setListeningCueIndex(0);
+      return;
+    }
+    const interval = window.setInterval(() => {
+      setListeningCueIndex((prev) => (prev + 1) % 3);
+    }, 5000);
+    return () => window.clearInterval(interval);
+  }, [stage]);
 
   const updateStage = (next: RecordStage) => {
     stageRef.current = next;
@@ -443,7 +710,7 @@ export function PracticeStudioPage() {
     mirrorVideo,
   ]);
 
-  const handleStartRecording = async () => {
+  const startMediaRecorderNow = async () => {
     if (!activeQuestion) return;
     if (!streamRef.current || !streamRef.current.active) {
       await initMediaStream(
@@ -453,7 +720,10 @@ export function PracticeStudioPage() {
       );
     }
     const stream = streamRef.current;
-    if (!stream || !stream.active) return;
+    if (!stream || !stream.active) {
+      updateStage('idle');
+      return;
+    }
 
     chunksRef.current = [];
     elapsedRef.current = 0;
@@ -529,6 +799,39 @@ export function PracticeStudioPage() {
     updateStage('recording');
   };
 
+  const handleStartRecording = async () => {
+    if (!activeQuestion) return;
+    if (!streamRef.current || !streamRef.current.active) {
+      await initMediaStream(
+        selectedVideoId || undefined,
+        selectedAudioId || undefined,
+        captureSource
+      );
+    }
+    if (!streamRef.current || !streamRef.current.active) return;
+
+    if (studioMode === 'interviewer' && ttsEnabled) {
+      updateStage('prep');
+      speakQuestionText(activeQuestion.content, () => {
+        if (stageRef.current === 'prep') {
+          startMediaRecorderNow();
+        }
+      });
+    } else {
+      stopSpeaking();
+      await startMediaRecorderNow();
+    }
+  };
+
+  const handleSkipQuestionSpeech = () => {
+    if (speechProceedRef.current) {
+      speechProceedRef.current();
+    } else if (stageRef.current === 'prep') {
+      stopSpeaking();
+      startMediaRecorderNow();
+    }
+  };
+
   const stopRecordingAndWait = useCallback((): Promise<void> => {
     return new Promise((resolve) => {
       const rec = recorderRef.current;
@@ -547,6 +850,11 @@ export function PracticeStudioPage() {
   }, []);
 
   const handleStopRecording = async () => {
+    stopSpeaking();
+    if (stage === 'prep') {
+      updateStage('idle');
+      return;
+    }
     if (stage === 'recording' || stage === 'paused') {
       await stopRecordingAndWait();
     }
@@ -566,7 +874,10 @@ export function PracticeStudioPage() {
 
   const selectQuestion = async (questionId: string) => {
     if (stage === 'saving') return;
-    if (stage === 'recording' || stage === 'paused') {
+    stopSpeaking();
+    if (stage === 'prep') {
+      updateStage('idle');
+    } else if (stage === 'recording' || stage === 'paused') {
       await stopRecordingAndWait();
     }
     setActiveQuestionId(questionId);
@@ -588,7 +899,10 @@ export function PracticeStudioPage() {
 
   const handleNextQuestion = async () => {
     if (stage === 'saving') return;
-    if (stage === 'recording' || stage === 'paused') {
+    stopSpeaking();
+    if (stage === 'prep') {
+      updateStage('idle');
+    } else if (stage === 'recording' || stage === 'paused') {
       await stopRecordingAndWait();
     }
     if (currentIndex < filteredQuestions.length - 1) {
@@ -620,6 +934,12 @@ export function PracticeStudioPage() {
 
   const isOverLimit =
     answerLimitSeconds > 0 && elapsedSeconds >= answerLimitSeconds;
+
+  const listeningCueMessages = [
+    '고개를 끄덕이며 답변의 핵심 논리와 근거를 경청하고 있습니다...',
+    '이력서 및 평가표를 대조하며 답변 키워드를 메모하고 있습니다...',
+    '지원자의 시선 처리와 답변 전달력을 주의 깊게 확인하고 있습니다...',
+  ];
 
   return (
     <div className="flex flex-col lg:flex-row gap-5 items-stretch min-h-[calc(100vh-7rem)]">
@@ -753,19 +1073,77 @@ export function PracticeStudioPage() {
               </button>
             </div>
 
-            <div className="text-sm font-medium text-slate-500">
-              질문 {filteredQuestions.length > 0 ? currentIndex + 1 : 0} /{' '}
-              {filteredQuestions.length}
+            <div className="flex flex-wrap items-center gap-3">
+              {/* 연습 방식 전환 탭: 셀프 화면 모드 vs 실전 면접관 모드 */}
+              <div className="inline-flex items-center rounded-xl border border-slate-200 bg-slate-100/80 p-1">
+                <button
+                  type="button"
+                  onClick={() => handleChangeStudioMode('self')}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+                    studioMode === 'self'
+                      ? 'bg-white text-slate-900 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Camera className="h-3.5 w-3.5 text-blue-600" />
+                  <span>내 화면 보며 연습</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleChangeStudioMode('interviewer')}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+                    studioMode === 'interviewer'
+                      ? 'bg-blue-600 text-white shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <UserCheck className="h-3.5 w-3.5" />
+                  <span>실전 면접관 모드</span>
+                </button>
+              </div>
+
+              <div className="text-sm font-medium text-slate-500">
+                질문 {filteredQuestions.length > 0 ? currentIndex + 1 : 0} /{' '}
+                {filteredQuestions.length}
+              </div>
             </div>
           </div>
 
           <div className="px-7 py-6 space-y-4">
             <div className="space-y-3">
-              <h1 className="text-2xl sm:text-[26px] font-bold text-slate-900 tracking-tight leading-snug break-keep">
-                {activeQuestion
-                  ? activeQuestion.content
-                  : '질문을 선택하거나 추가해 주세요'}
-              </h1>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <h1 className="text-2xl sm:text-[26px] font-bold text-slate-900 tracking-tight leading-snug break-keep flex-1">
+                  {activeQuestion
+                    ? activeQuestion.content
+                    : '질문을 선택하거나 추가해 주세요'}
+                </h1>
+
+                {activeQuestion && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isInterviewerSpeaking) {
+                        stopSpeaking();
+                      } else {
+                        speakQuestionText(activeQuestion.content);
+                      }
+                    }}
+                    className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-colors shrink-0 ${
+                      isInterviewerSpeaking
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                    title="면접관 음성으로 질문 듣기"
+                  >
+                    <Volume2 className="h-3.5 w-3.5 text-blue-600" />
+                    <span>
+                      {isInterviewerSpeaking
+                        ? '질문 읽기 중지'
+                        : '질문 음성으로 듣기'}
+                    </span>
+                  </button>
+                )}
+              </div>
 
               <div className="flex flex-wrap items-center gap-2.5">
                 {previousRecordingsForCurrent.length > 0 ? (
@@ -788,6 +1166,80 @@ export function PracticeStudioPage() {
                   </span>
                 )}
 
+                {studioMode === 'interviewer' && (
+                  <>
+                    <div className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+                      {INTERVIEWER_PERSONAS.map((persona) => (
+                        <button
+                          key={persona.id}
+                          type="button"
+                          onClick={() => setSelectedPersonaId(persona.id)}
+                          className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+                            selectedPersonaId === persona.id
+                              ? 'bg-white text-blue-700 shadow-2xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          {persona.name}
+                        </button>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setTtsEnabled((v) => !v)}
+                      className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors ${
+                        ttsEnabled
+                          ? 'border-blue-200 bg-blue-50 text-blue-700'
+                          : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
+                      }`}
+                      title="녹화 시작 시 면접관이 먼저 질문을 음성으로 읽어줍니다"
+                    >
+                      {ttsEnabled ? (
+                        <Volume2 className="h-3.5 w-3.5" />
+                      ) : (
+                        <VolumeX className="h-3.5 w-3.5" />
+                      )}
+                      <span>
+                        녹화 전 면접관 질문 읽기: {ttsEnabled ? '켜짐' : '꺼짐'}
+                      </span>
+                    </button>
+
+                    <input
+                      ref={customVideoInputRef}
+                      type="file"
+                      accept="video/mp4,video/webm"
+                      onChange={handleUploadCustomVideo}
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => customVideoInputRef.current?.click()}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 transition-colors"
+                      title="HeyGen, D-ID 등으로 제작한 AI 면접관 루프 영상(.mp4)을 적용할 수 있습니다"
+                    >
+                      <Upload className="h-3.5 w-3.5 text-slate-500" />
+                      <span>
+                        {customVideoUrl
+                          ? '면접관 영상(.mp4) 변경'
+                          : '내 면접관 영상(.mp4) 넣기'}
+                      </span>
+                    </button>
+
+                    {customVideoUrl && (
+                      <button
+                        type="button"
+                        onClick={handleResetCustomVideo}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 px-2 py-1 text-xs font-medium text-slate-500"
+                        title="기본 AI 면접관 화면으로 되돌리기"
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                        <span>기본 아바타로</span>
+                      </button>
+                    )}
+                  </>
+                )}
+
                 {stage === 'saved' && activeQuestion && (
                   <button
                     type="button"
@@ -803,46 +1255,294 @@ export function PracticeStudioPage() {
               </div>
             </div>
 
-            <div className="relative aspect-video w-full max-w-[780px] overflow-hidden rounded-2xl bg-slate-900 border border-slate-200 shadow-xs">
-              <video
-                ref={videoRef}
-                autoPlay
-                muted
-                playsInline
-                className={`h-full w-full object-cover ${
-                  captureSource === 'camera' && mirrorVideo
-                    ? 'scale-x-[-1]'
-                    : ''
-                } ${isStreamReady ? 'block' : 'hidden'}`}
-              />
+            {/* 메인 비디오 스테이지: 셀프 모드 & 실전 면접관 모드 겸용 */}
+            <div
+              className={`relative aspect-video w-full max-w-[780px] overflow-hidden rounded-2xl bg-slate-950 border shadow-xs transition-all ${
+                studioMode === 'interviewer' && isInterviewerSpeaking
+                  ? 'border-emerald-400 ring-2 ring-emerald-400/40'
+                  : 'border-slate-200'
+              }`}
+            >
+              {/* 실전 면접관 모드일 때 배경 전체를 채우는 면접관 뷰 */}
+              {studioMode === 'interviewer' && (
+                <div className="absolute inset-0 z-10 flex flex-col justify-between bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 select-none overflow-hidden">
+                  {customVideoUrl ? (
+                    <video
+                      ref={interviewerVideoRef}
+                      src={customVideoUrl}
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                      className="absolute inset-0 h-full w-full object-cover"
+                    />
+                  ) : (
+                    /* 기본 내장 AI 면접관 화상 스튜디오 뷰 */
+                    <div className="absolute inset-0 flex flex-col items-center justify-center p-6">
+                      {/* 배경 오피스 조명 연출 */}
+                      <div
+                        className={`absolute w-96 h-96 rounded-full blur-3xl opacity-20 pointer-events-none transition-all duration-700 ${
+                          isInterviewerSpeaking
+                            ? 'bg-emerald-500 scale-110'
+                            : stage === 'recording'
+                            ? 'bg-blue-500 scale-105'
+                            : 'bg-slate-600'
+                        }`}
+                      />
 
-              {!isStreamReady && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center text-white/90 space-y-3">
-                  <AlertTriangle className="h-8 w-8 text-amber-400" />
-                  <p className="text-sm font-medium max-w-md">
-                    {deviceError || '카메라 미리보기를 연결하고 있습니다...'}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      initMediaStream(
-                        selectedVideoId || undefined,
-                        selectedAudioId || undefined,
-                        captureSource
-                      )
-                    }
-                    className="rounded-lg bg-white/15 hover:bg-white/25 px-3.5 py-1.5 text-xs font-semibold text-white transition-colors"
-                  >
-                    카메라·마이크 다시 연결
-                  </button>
+                      {/* 면접관 아바타 및 정장 실루엣 */}
+                      <div className="relative flex flex-col items-center">
+                        <div
+                          className={`relative flex items-center justify-center w-32 h-32 sm:w-40 sm:h-40 rounded-full border-4 transition-all duration-500 shadow-2xl ${
+                            isInterviewerSpeaking
+                              ? 'border-emerald-400 shadow-emerald-500/25 scale-[1.03]'
+                              : stage === 'recording'
+                              ? 'border-blue-400/80 shadow-blue-500/20'
+                              : 'border-slate-700'
+                          } bg-gradient-to-b from-slate-700 to-slate-800`}
+                        >
+                          {/* 정장 면접관 일러스트 SVG */}
+                          <svg
+                            viewBox="0 0 120 120"
+                            className={`w-28 h-28 sm:w-36 sm:h-36 transition-transform duration-700 ${
+                              stage === 'recording' ? 'animate-pulse' : ''
+                            }`}
+                            fill="none"
+                          >
+                            {/* 배경 원 */}
+                            <circle cx="60" cy="60" r="56" fill="#1E293B" />
+                            {/* 정장 자켓 어깨 */}
+                            <path
+                              d="M20 112C24 88 40 78 60 78C80 78 96 88 100 112"
+                              fill="#0F172A"
+                            />
+                            {/* 셔츠 & 넥타이 */}
+                            <path d="M50 78L60 106L70 78H50Z" fill="#F8FAFC" />
+                            <path
+                              d="M58 84L60 78L62 84L61 106H59L58 84Z"
+                              fill={
+                                activePersona.id === 'tech-lead'
+                                  ? '#2563EB'
+                                  : '#059669'
+                              }
+                            />
+                            {/* 목 */}
+                            <rect
+                              x="52"
+                              y="64"
+                              width="16"
+                              height="16"
+                              rx="6"
+                              fill="#F1C27D"
+                            />
+                            {/* 얼굴 */}
+                            <ellipse
+                              cx="60"
+                              cy="48"
+                              rx="20"
+                              ry="23"
+                              fill="#F5CBA7"
+                            />
+                            {/* 헤어 스타일 */}
+                            {activePersona.id === 'tech-lead' ? (
+                              <path
+                                d="M40 44C40 28 48 22 60 22C72 22 80 28 80 44C76 34 68 30 60 30C50 30 43 35 40 44Z"
+                                fill="#1E293B"
+                              />
+                            ) : (
+                              <path
+                                d="M38 52C38 28 47 21 60 21C73 21 82 28 82 52C79 36 71 30 60 30C49 30 41 36 38 52Z"
+                                fill="#0F172A"
+                              />
+                            )}
+                            {/* 안경 (기술 면접관) */}
+                            {activePersona.id === 'tech-lead' && (
+                              <g stroke="#334155" strokeWidth="2">
+                                <rect
+                                  x="45"
+                                  y="43"
+                                  width="11"
+                                  height="8"
+                                  rx="2"
+                                  fill="#E2E8F0"
+                                  fillOpacity="0.25"
+                                />
+                                <rect
+                                  x="64"
+                                  y="43"
+                                  width="11"
+                                  height="8"
+                                  rx="2"
+                                  fill="#E2E8F0"
+                                  fillOpacity="0.25"
+                                />
+                                <line x1="56" y1="47" x2="64" y2="47" />
+                              </g>
+                            )}
+                            {/* 눈 */}
+                            <circle cx="50.5" cy="47" r="2" fill="#0F172A" />
+                            <circle cx="69.5" cy="47" r="2" fill="#0F172A" />
+                            {/* 입 모양 (말할 때 vs 경청할 때) */}
+                            {isInterviewerSpeaking ? (
+                              <ellipse
+                                cx="60"
+                                cy="59"
+                                rx="4.5"
+                                ry="3"
+                                fill="#BE123C"
+                              />
+                            ) : (
+                              <path
+                                d="M54 58C56 60.5 64 60.5 66 58"
+                                stroke="#475569"
+                                strokeWidth="2.2"
+                                strokeLinecap="round"
+                              />
+                            )}
+                          </svg>
+
+                          {/* 음성 파형 뱃지 (면접관 발화 시) */}
+                          {isInterviewerSpeaking && (
+                            <div className="absolute -bottom-3 inline-flex items-center gap-1 rounded-full bg-emerald-500 px-3 py-1 text-[11px] font-bold text-white shadow-md">
+                              <Volume2 className="h-3 w-3 animate-bounce" />
+                              <span>질문 발화 중</span>
+                            </div>
+                          )}
+
+                          {/* 경청 뱃지 (지원자 답변 녹화 중일 때) */}
+                          {!isInterviewerSpeaking && stage === 'recording' && (
+                            <div className="absolute -bottom-3 inline-flex items-center gap-1.5 rounded-full bg-blue-600 px-3 py-1 text-[11px] font-bold text-white shadow-md">
+                              <span className="h-2 w-2 rounded-full bg-emerald-300 animate-ping" />
+                              <span>경청 및 평가 기록 중</span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="mt-5 text-center space-y-1">
+                          <div className="inline-flex items-center gap-2">
+                            <span className="text-base sm:text-lg font-bold text-white">
+                              {activePersona.name}
+                            </span>
+                            <span className="rounded-md bg-white/10 px-2 py-0.5 text-[11px] font-medium text-blue-300 border border-white/10">
+                              {activePersona.badge}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-400">
+                            {activePersona.role}
+                          </p>
+                        </div>
+
+                        {/* 상태별 안내 캡션 */}
+                        <div className="mt-4 max-w-md rounded-xl bg-white/5 border border-white/10 backdrop-blur-xs px-4 py-2.5 text-center">
+                          {isInterviewerSpeaking ? (
+                            <p className="text-xs sm:text-sm font-medium text-emerald-300">
+                              &ldquo;{activeQuestion?.content}&rdquo;
+                            </p>
+                          ) : stage === 'recording' ? (
+                            <p className="text-xs font-medium text-slate-200">
+                              {listeningCueMessages[listeningCueIndex]}
+                            </p>
+                          ) : (
+                            <p className="text-xs text-slate-300">
+                              {activePersona.description}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 면접관 질문 중일 때 바로 답변 시작(건너뛰기) 오버레이 버튼 */}
+                  {stage === 'prep' && (
+                    <div className="relative z-30 mt-auto p-4 flex items-center justify-center bg-gradient-to-t from-black/80 via-black/40 to-transparent">
+                      <div className="flex flex-wrap items-center gap-3 rounded-xl bg-slate-900/90 border border-emerald-400/40 px-4 py-2.5 text-white shadow-lg">
+                        <span className="text-xs font-medium text-emerald-300">
+                          면접관이 질문을 읽고 있습니다. 끝나면 자동으로 녹화가 시작됩니다.
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleSkipQuestionSpeech}
+                          className="inline-flex items-center gap-1 rounded-lg bg-emerald-500 hover:bg-emerald-600 px-3 py-1 text-xs font-bold text-white transition-colors"
+                        >
+                          <SkipForward className="h-3.5 w-3.5" />
+                          <span>바로 답변 녹화 시작</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
-              <div className="absolute top-4 left-4 flex items-center gap-2">
+              {/* 내 카메라 스트림: 셀프 모드에서는 전체 화면, 면접관 모드에서는 우측 하단 PIP */}
+              <div
+                className={
+                  studioMode === 'interviewer'
+                    ? 'absolute bottom-3.5 right-3.5 z-20 w-40 sm:w-52 aspect-video rounded-xl overflow-hidden border-2 border-white/85 bg-slate-900 shadow-2xl transition-all'
+                    : 'relative w-full h-full'
+                }
+              >
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  muted
+                  playsInline
+                  className={`h-full w-full object-cover ${
+                    captureSource === 'camera' && mirrorVideo
+                      ? 'scale-x-[-1]'
+                      : ''
+                  } ${isStreamReady ? 'block' : 'hidden'}`}
+                />
+
+                {!isStreamReady && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center p-3 text-center text-white/90 space-y-2 bg-slate-900">
+                    <AlertTriangle className="h-6 w-6 text-amber-400" />
+                    <p className="text-[11px] sm:text-xs font-medium max-w-md line-clamp-2">
+                      {deviceError || '카메라 연결 중...'}
+                    </p>
+                    {studioMode === 'self' && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          initMediaStream(
+                            selectedVideoId || undefined,
+                            selectedAudioId || undefined,
+                            captureSource
+                          )
+                        }
+                        className="rounded-lg bg-white/15 hover:bg-white/25 px-3 py-1.5 text-xs font-semibold text-white transition-colors"
+                      >
+                        카메라·마이크 다시 연결
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {studioMode === 'interviewer' && (
+                  <div className="absolute bottom-1.5 left-2 right-2 flex items-center justify-between pointer-events-none">
+                    <span className="rounded bg-black/65 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                      지원자 (나)
+                    </span>
+                    <span
+                      className={`h-2 w-2 rounded-full ${
+                        micActive ? 'bg-emerald-400' : 'bg-white/40'
+                      }`}
+                      title="마이크 입력 감지"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* 좌측 상단 상태 배지 */}
+              <div className="absolute top-4 left-4 z-30 flex flex-wrap items-center gap-2">
                 {stage === 'recording' ? (
                   <div className="inline-flex items-center gap-2 rounded-lg bg-red-600/90 backdrop-blur-xs px-3 py-1.5 text-xs font-bold text-white shadow-sm">
                     <span className="h-2 w-2 rounded-full bg-white animate-pulse" />
-                    <span>REC 녹화 중</span>
+                    <span>REC 답변 녹화 중</span>
+                  </div>
+                ) : stage === 'prep' ? (
+                  <div className="inline-flex items-center gap-2 rounded-lg bg-emerald-600/90 backdrop-blur-xs px-3 py-1.5 text-xs font-bold text-white shadow-sm">
+                    <Sparkles className="h-3.5 w-3.5 animate-spin" />
+                    <span>면접관 질문 진행 중</span>
                   </div>
                 ) : stage === 'paused' ? (
                   <div className="inline-flex items-center gap-2 rounded-lg bg-amber-600/90 backdrop-blur-xs px-3 py-1.5 text-xs font-bold text-white shadow-sm">
@@ -851,9 +1551,13 @@ export function PracticeStudioPage() {
                 ) : (
                   <div className="inline-flex items-center gap-2 rounded-lg bg-black/55 backdrop-blur-xs px-3 py-1.5 text-xs font-medium text-white">
                     <span>
-                      {captureSource === 'screen'
+                      {studioMode === 'interviewer'
+                        ? `실전 면접관 모드 (${
+                            customVideoUrl ? '커스텀 영상' : activePersona.name
+                          })`
+                        : captureSource === 'screen'
                         ? '화면 공유 미리보기'
-                        : '카메라 미리보기'}
+                        : '셀프 카메라 미리보기'}
                     </span>
                   </div>
                 )}
@@ -878,7 +1582,11 @@ export function PracticeStudioPage() {
                     setCaptureSource('camera');
                     initMediaStream(vId, selectedAudioId || undefined, 'camera');
                   }}
-                  disabled={stage === 'recording' || stage === 'paused'}
+                  disabled={
+                    stage === 'recording' ||
+                    stage === 'paused' ||
+                    stage === 'prep'
+                  }
                   aria-label="카메라 선택"
                   className="h-10 appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-600 cursor-pointer max-w-[140px] truncate disabled:opacity-50"
                 >
@@ -887,7 +1595,9 @@ export function PracticeStudioPage() {
                   ) : (
                     videoDevices.map((d, i) => (
                       <option key={d.deviceId || i} value={d.deviceId}>
-                        {d.label ? `카메라 (${d.label.slice(0, 12)})` : `카메라 ${i + 1}`}
+                        {d.label
+                          ? `카메라 (${d.label.slice(0, 12)})`
+                          : `카메라 ${i + 1}`}
                       </option>
                     ))
                   )}
@@ -912,7 +1622,11 @@ export function PracticeStudioPage() {
                       captureSource
                     );
                   }}
-                  disabled={stage === 'recording' || stage === 'paused'}
+                  disabled={
+                    stage === 'recording' ||
+                    stage === 'paused' ||
+                    stage === 'prep'
+                  }
                   aria-label="마이크 선택"
                   className="h-10 appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-600 cursor-pointer max-w-[140px] truncate disabled:opacity-50"
                 >
@@ -921,7 +1635,9 @@ export function PracticeStudioPage() {
                   ) : (
                     audioDevices.map((d, i) => (
                       <option key={d.deviceId || i} value={d.deviceId}>
-                        {d.label ? `마이크 (${d.label.slice(0, 12)})` : `마이크 ${i + 1}`}
+                        {d.label
+                          ? `마이크 (${d.label.slice(0, 12)})`
+                          : `마이크 ${i + 1}`}
                       </option>
                     ))
                   )}
@@ -970,11 +1686,15 @@ export function PracticeStudioPage() {
                       }
                     }
                   }}
-                  disabled={stage === 'recording' || stage === 'paused'}
+                  disabled={
+                    stage === 'recording' ||
+                    stage === 'paused' ||
+                    stage === 'prep'
+                  }
                   aria-label="화면 공유 및 화면 모드"
                   className="h-10 appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-xs font-semibold text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-600 cursor-pointer disabled:opacity-50"
                 >
-                  <option value="camera-mirror">화면 공유</option>
+                  <option value="camera-mirror">카메라 (거울 모드)</option>
                   <option value="camera-normal">카메라 (좌우반전 해제)</option>
                   <option value="screen">화면 공유로 녹화</option>
                 </select>
@@ -1009,6 +1729,24 @@ export function PracticeStudioPage() {
                     )}
                   </button>
                 </div>
+              ) : stage === 'prep' ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSkipQuestionSpeech}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-5 h-10 text-sm font-bold text-white shadow-xs transition-colors"
+                  >
+                    <SkipForward className="h-4 w-4" />
+                    <span>바로 답변 시작</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleStopRecording}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 px-3.5 h-10 text-xs font-semibold text-slate-700 transition-colors"
+                  >
+                    <span>취소</span>
+                  </button>
+                </div>
               ) : (
                 <button
                   type="button"
@@ -1017,7 +1755,11 @@ export function PracticeStudioPage() {
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-7 h-10 text-sm font-bold text-white shadow-xs transition-colors"
                 >
                   <span className="h-2.5 w-2.5 rounded-full bg-white" />
-                  <span>녹화 시작</span>
+                  <span>
+                    {studioMode === 'interviewer' && ttsEnabled
+                      ? '면접 시작 (질문 듣고 녹화)'
+                      : '녹화 시작'}
+                  </span>
                 </button>
               )}
 

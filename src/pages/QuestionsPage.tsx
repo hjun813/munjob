@@ -448,7 +448,7 @@ export function QuestionsPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => navigate(`/?questionId=${q.id}`)}
+                    onClick={() => navigate(`/studio?questionId=${q.id}`)}
                   >
                     <Play className="h-3.5 w-3.5 text-blue-600" />
                     <span>연습실에서 녹화</span>

@@ -5,6 +5,7 @@ import type {
   InterviewSession,
   AnswerRecording,
   SelfFeedback,
+  User,
 } from '@/types/interview';
 
 export class InterviewLabDB extends Dexie {
@@ -13,6 +14,7 @@ export class InterviewLabDB extends Dexie {
   sessions!: EntityTable<InterviewSession, 'id'>;
   recordings!: EntityTable<AnswerRecording, 'id'>;
   feedbacks!: EntityTable<SelfFeedback, 'id'>;
+  users!: EntityTable<User, 'id'>;
 
   constructor() {
     super('InterviewLabDatabase');
@@ -22,6 +24,14 @@ export class InterviewLabDB extends Dexie {
       sessions: 'id, startedAt, endedAt, status',
       recordings: 'id, sessionId, questionId, recordedAt',
       feedbacks: 'id, recordingId, sessionId, questionId, updatedAt',
+    });
+    this.version(2).stores({
+      categories: 'id, name, createdAt',
+      questions: 'id, categoryId, createdAt, updatedAt',
+      sessions: 'id, startedAt, endedAt, status',
+      recordings: 'id, sessionId, questionId, recordedAt',
+      feedbacks: 'id, recordingId, sessionId, questionId, updatedAt',
+      users: 'id, &email, name, createdAt',
     });
   }
 }
@@ -155,6 +165,16 @@ export const INITIAL_SAMPLE_QUESTIONS: Question[] = [
   },
 ];
 
+export const DEMO_USER: User = {
+  id: 'user-demo-1',
+  email: 'demo@interviewlab.kr',
+  passwordHash: 'password123',
+  name: '김인터뷰',
+  targetRole: '백엔드 개발자',
+  bio: '대용량 트래픽 처리와 안정적인 서버 아키텍처를 고민하는 백엔드 개발자 지망생입니다.',
+  createdAt: '2026-01-01T00:00:00.000Z',
+};
+
 let initPromise: Promise<void> | null = null;
 
 export function ensureDatabaseSeeded(): Promise<void> {
@@ -163,6 +183,11 @@ export function ensureDatabaseSeeded(): Promise<void> {
   initPromise = (async () => {
     try {
       await db.categories.bulkPut(DEFAULT_CATEGORIES);
+
+      const existingDemo = await db.users.get(DEMO_USER.id);
+      if (!existingDemo) {
+        await db.users.put(DEMO_USER);
+      }
 
       const seededV2 = localStorage.getItem('interview_lab_seeded_v2');
       if (!seededV2) {
