@@ -1403,8 +1403,13 @@ export function PracticeStudioPage() {
 
                           {/* 음성 파형 뱃지 (면접관 발화 시) */}
                           {isInterviewerSpeaking && (
-                            <div className="absolute -bottom-3 inline-flex items-center gap-1 rounded-full bg-emerald-500 px-3 py-1 text-[11px] font-bold text-white shadow-md">
-                              <Volume2 className="h-3 w-3 animate-bounce" />
+                            <div className="absolute -bottom-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-500 px-3 py-1 text-[11px] font-bold text-white shadow-md">
+                              <span className="inline-flex items-end gap-0.5 h-3">
+                                <span className="w-0.5 h-full bg-white rounded-full animate-eq-1" />
+                                <span className="w-0.5 h-full bg-white rounded-full animate-eq-2" />
+                                <span className="w-0.5 h-full bg-white rounded-full animate-eq-3" />
+                                <span className="w-0.5 h-full bg-white rounded-full animate-eq-4" />
+                              </span>
                               <span>질문 발화 중</span>
                             </div>
                           )}
