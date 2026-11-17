@@ -250,10 +250,10 @@ export function MainPage() {
   );
 
   return (
-    <div className="flex-1 flex flex-col justify-between bg-white min-h-[calc(100vh-3.75rem)]">
+    <div className="flex-1 flex flex-col justify-between bg-white">
       {/* Main Hero Section */}
-      <section className="flex-1 flex items-center px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
-        <div className="max-w-[1380px] mx-auto w-full grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-center">
+      <section className="flex-1 flex items-center px-4 sm:px-6 lg:px-10 py-10 lg:py-16">
+        <div className="max-w-[1360px] mx-auto w-full grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-center">
           {/* Left Copy & CTA */}
           <div className="lg:col-span-5 space-y-6 animate-fade-in-up">
             <h1 className="text-[36px] sm:text-[44px] xl:text-[50px] font-extrabold tracking-tight text-slate-900 leading-[1.24] break-keep">
@@ -693,8 +693,8 @@ export function MainPage() {
       </section>
 
       {/* Bottom 3-Column Feature Strip */}
-      <section className="border-t border-slate-200/80 bg-[#F5F7FA] px-4 sm:px-6 lg:px-8 py-6 lg:py-7">
-        <div className="max-w-[1380px] mx-auto grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-200/90">
+      <section className="border-t border-slate-200/80 bg-[#F5F7FA] px-4 sm:px-6 lg:px-10 py-8 lg:py-11">
+        <div className="max-w-[1360px] mx-auto grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-200/90">
           {/* 1. 질문 준비 */}
           <Link
             to="/questions"

@@ -32,6 +32,8 @@ import {
   Sparkles,
   SkipForward,
   Lightbulb,
+  SlidersHorizontal,
+  Keyboard,
 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '@/db/database';
@@ -182,8 +184,8 @@ export function PracticeStudioPage() {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>(
     queryCategoryId || 'all'
   );
+  const [isCategoryMenuOpen, setIsCategoryMenuOpen] = useState(false);
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
-  const [showHintMemo, setShowHintMemo] = useState<boolean>(true);
 
   const [isRandomOrder, setIsRandomOrder] = useState(false);
   const [shuffledIds, setShuffledIds] = useState<string[]>([]);
@@ -420,15 +422,15 @@ export function PracticeStudioPage() {
   const activeQuestion = filteredQuestions[currentIndex] || null;
 
   const activeCategoryName = useMemo(() => {
-    if (activeQuestion) {
-      return (
-        categories.find((c) => c.id === activeQuestion.categoryId)?.name ||
-        '백엔드 기술 면접'
-      );
-    }
     if (selectedCategoryId !== 'all') {
       return (
         categories.find((c) => c.id === selectedCategoryId)?.name ||
+        '백엔드 기술 면접'
+      );
+    }
+    if (activeQuestion) {
+      return (
+        categories.find((c) => c.id === activeQuestion.categoryId)?.name ||
         '백엔드 기술 면접'
       );
     }
@@ -942,84 +944,141 @@ export function PracticeStudioPage() {
     '지원자의 시선 처리와 답변 전달력을 주의 깊게 확인하고 있습니다...',
   ];
 
+  const [showKeywordMemo, setShowKeywordMemo] = useState<boolean>(false);
+
+  const completedCount = filteredQuestions.filter(
+    (q) => (recordingsByQuestion.get(q.id)?.length || 0) > 0
+  ).length;
+  const progressRatio =
+    filteredQuestions.length > 0
+      ? Math.round((completedCount / filteredQuestions.length) * 100)
+      : 0;
+
+  const isBusy =
+    stage === 'recording' || stage === 'paused' || stage === 'prep';
+
+  // 키보드 단축키: Space = 녹화 시작/종료, ← → = 질문 이동
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (isQuickAddOpen) return;
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (stage === 'recording' || stage === 'paused') {
+          handleStopRecording();
+        } else if (stage === 'prep') {
+          handleSkipQuestionSpeech();
+        } else if (stage !== 'saving' && activeQuestion) {
+          handleStartRecording();
+        }
+      } else if (e.key === 'ArrowRight' && !isBusy) {
+        handleNextQuestion();
+      } else if (e.key === 'ArrowLeft' && !isBusy) {
+        handlePrevQuestion();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  });
+
+  const stepIndex =
+    stage === 'idle' ? 0 : stage === 'prep' ? 1 : stage === 'saved' ? 3 : 2;
+  const STEPS = ['질문 확인', studioMode === 'interviewer' ? '질문 듣기' : '준비', '답변 녹화', '복기하기'];
+
   return (
-    <div className="flex flex-col lg:flex-row gap-3.5 items-stretch lg:h-[calc(100vh-5.2rem)]">
-      {/* 좌측: 카테고리 필터 + 질문 목록 + 이전/다음 네비게이션 */}
-      <aside className="w-full lg:w-[275px] shrink-0 rounded-2xl border border-slate-200/90 bg-white shadow-2xs flex flex-col overflow-hidden max-h-[300px] lg:max-h-none">
-        {/* 사이드바 상단: 타이틀 & 카테고리 필터 */}
-        <div className="p-3.5 border-b border-slate-100 space-y-2.5 bg-slate-50/50">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5">
-              <h2 className="text-sm font-extrabold text-slate-900 tracking-tight">
-                질문 목록
-              </h2>
-              <span className="rounded-md bg-blue-50 px-1.5 py-0.5 text-[11px] font-bold text-[#0B50E8]">
-                {filteredQuestions.length > 0 ? currentIndex + 1 : 0}/
-                {filteredQuestions.length}
+    <div className="grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[260px_minmax(0,1fr)_300px] gap-5 items-start">
+      {/* ───────── 좌측: 질문 목록 ───────── */}
+      <aside className="rounded-2xl border border-slate-200/90 bg-white shadow-xs flex flex-col overflow-hidden lg:sticky lg:top-20 lg:max-h-[calc(100vh-6.5rem)]">
+        <div className="px-4 pt-4 pb-3 border-b border-slate-100 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-[15px] font-bold text-slate-900 tracking-tight">
+              질문 목록
+            </h2>
+            <button
+              type="button"
+              onClick={() => setIsQuickAddOpen(true)}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>추가</span>
+            </button>
+          </div>
+
+          {/* 진행률 */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-[11px] font-semibold">
+              <span className="text-slate-500">연습 진행률</span>
+              <span className="text-blue-600">
+                {completedCount} / {filteredQuestions.length} 완료
               </span>
             </div>
-
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={toggleRandomShuffle}
-                className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-semibold transition-colors cursor-pointer ${
-                  isRandomOrder
-                    ? 'border-blue-200 bg-blue-50 text-[#0B50E8]'
-                    : 'border-slate-200 bg-white text-slate-500 hover:text-slate-800'
-                }`}
-                title="질문 순서 랜덤 셔플"
-              >
-                <Shuffle className="h-3 w-3" />
-                <span>{isRandomOrder ? '랜덤' : '순차'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsQuickAddOpen(true)}
-                className="inline-flex items-center gap-1 rounded-lg bg-[#0B50E8] hover:bg-[#0942C2] px-2.5 py-1 text-[11px] font-bold text-white transition-colors cursor-pointer"
-              >
-                <Plus className="h-3 w-3" />
-                <span>추가</span>
-              </button>
+            <div className="h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-blue-500 to-blue-600 transition-all duration-500"
+                style={{ width: `${progressRatio}%` }}
+              />
             </div>
           </div>
 
-          {/* 카테고리 드롭다운 */}
-          <div className="relative">
-            <select
-              value={selectedCategoryId}
-              onChange={(e) => setSelectedCategoryId(e.target.value)}
-              aria-label="카테고리 필터"
-              className="w-full h-8 appearance-none rounded-lg border border-slate-200 bg-white pl-2.5 pr-7 text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#0B50E8] cursor-pointer"
+          {/* 카테고리 + 순서 */}
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1 min-w-0">
+              <select
+                value={selectedCategoryId}
+                onChange={(e) => setSelectedCategoryId(e.target.value)}
+                disabled={isBusy}
+                aria-label="카테고리 선택"
+                className="w-full h-8 appearance-none rounded-lg border border-slate-200 bg-slate-50 pl-2.5 pr-7 text-xs font-semibold text-slate-700 hover:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 truncate disabled:opacity-50"
+              >
+                <option value="all">전체 질문 ({allQuestions.length})</option>
+                {categories.map((cat) => {
+                  const count = allQuestions.filter(
+                    (q) => q.categoryId === cat.id
+                  ).length;
+                  return (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.name} ({count})
+                    </option>
+                  );
+                })}
+              </select>
+              <ChevronDown className="h-3.5 w-3.5 text-slate-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
+            <button
+              type="button"
+              onClick={toggleRandomShuffle}
+              disabled={isBusy}
+              className={`inline-flex items-center gap-1 h-8 rounded-lg border px-2 text-[11px] font-semibold transition-colors shrink-0 disabled:opacity-50 ${
+                isRandomOrder
+                  ? 'border-blue-200 bg-blue-50 text-blue-700'
+                  : 'border-slate-200 bg-white text-slate-500 hover:text-slate-800'
+              }`}
+              title="질문 순서 랜덤 셔플"
             >
-              <option value="all">
-                전체 면접 질문 ({allQuestions.length}개)
-              </option>
-              {categories.map((cat) => {
-                const count = allQuestions.filter(
-                  (q) => q.categoryId === cat.id
-                ).length;
-                return (
-                  <option key={cat.id} value={cat.id}>
-                    {cat.name} ({count}개)
-                  </option>
-                );
-              })}
-            </select>
-            <ChevronDown className="h-3.5 w-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <Shuffle className="h-3.5 w-3.5" />
+              <span>{isRandomOrder ? '랜덤' : '순서대로'}</span>
+            </button>
           </div>
         </div>
 
-        {/* 질문 리스트 */}
-        <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+        <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {filteredQuestions.length === 0 ? (
-            <div className="p-6 text-center space-y-2.5">
+            <div className="p-6 text-center space-y-3">
               <p className="text-xs text-slate-500">등록된 질문이 없습니다.</p>
               <button
                 type="button"
                 onClick={() => setIsQuickAddOpen(true)}
-                className="inline-flex items-center gap-1 rounded-lg bg-[#0B50E8] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#0942C2]"
+                className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
               >
                 <Plus className="h-3.5 w-3.5" />
                 <span>첫 질문 등록하기</span>
@@ -1036,19 +1095,44 @@ export function PracticeStudioPage() {
                   key={q.id}
                   type="button"
                   onClick={() => selectQuestion(q.id)}
-                  className={`w-full text-left px-3.5 py-2.5 flex items-center justify-between gap-2 transition-colors border-l-[3.5px] cursor-pointer ${
+                  className={`w-full text-left rounded-xl px-3 py-2.5 flex items-center gap-2.5 transition-all ${
                     isSelected
-                      ? 'bg-[#EEF4FF] border-l-[#0B50E8] text-slate-900 font-bold'
-                      : 'bg-white border-l-transparent text-slate-700 hover:bg-slate-50 font-medium'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-slate-700 hover:bg-slate-50'
                   }`}
                 >
-                  <span className="text-[12.5px] truncate">
-                    {idx + 1}. {displayLabel}
+                  <span
+                    className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
+                      isSelected
+                        ? 'bg-white/20 text-white'
+                        : recCount > 0
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-slate-100 text-slate-500'
+                    }`}
+                  >
+                    {recCount > 0 && !isSelected ? (
+                      <Check className="h-3.5 w-3.5 stroke-[3]" />
+                    ) : (
+                      idx + 1
+                    )}
+                  </span>
+                  <span
+                    className={`flex-1 min-w-0 text-[13px] leading-snug line-clamp-2 ${
+                      isSelected ? 'font-semibold' : 'font-medium'
+                    }`}
+                  >
+                    {displayLabel}
                   </span>
                   {recCount > 0 && (
-                    <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 shrink-0">
-                      <Check className="h-2.5 w-2.5 stroke-[3]" />
-                      {recCount}
+                    <span
+                      className={`shrink-0 text-[10px] font-bold rounded-md px-1.5 py-0.5 ${
+                        isSelected
+                          ? 'bg-white/20 text-white'
+                          : 'bg-slate-100 text-slate-500'
+                      }`}
+                      title="녹화 횟수"
+                    >
+                      {recCount}회
                     </span>
                   )}
                 </button>
@@ -1056,642 +1140,513 @@ export function PracticeStudioPage() {
             })
           )}
         </div>
-
-        {/* 사이드바 하단: 빠른 질문 이동 */}
-        <div className="p-2.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={handlePrevQuestion}
-            disabled={currentIndex <= 0 || stage === 'saving'}
-            className="flex-1 inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:pointer-events-none transition-colors cursor-pointer"
-          >
-            <ChevronLeft className="h-3.5 w-3.5" />
-            <span>이전 질문</span>
-          </button>
-          <button
-            type="button"
-            onClick={handleNextQuestion}
-            disabled={!activeQuestion || stage === 'saving'}
-            className="flex-1 inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 transition-colors cursor-pointer"
-          >
-            <span>
-              {currentIndex >= filteredQuestions.length - 1
-                ? '기록 보기'
-                : '다음 질문'}
-            </span>
-            <ChevronRight className="h-3.5 w-3.5" />
-          </button>
-        </div>
       </aside>
 
-      {/* 우측 메인 스튜디오: 한 화면에 꽉 차는 3단 구성 (질문 헤더 + 중앙 비디오 + 하단 컨트롤 독) */}
-      <section className="flex-1 min-w-0 rounded-2xl border border-slate-200/90 bg-white shadow-2xs flex flex-col justify-between overflow-hidden">
-        {/* 1. 상단 컴팩트 질문 & 모드 전환 헤더 */}
-        <div className="px-5 py-3.5 border-b border-slate-100 space-y-2 shrink-0">
+      {/* ───────── 가운데: 질문 + 녹화 무대 ───────── */}
+      <section className="min-w-0 space-y-4">
+        <div className="rounded-2xl border border-slate-200/90 bg-white shadow-xs p-5 sm:p-6 space-y-4">
+          {/* 상단: 진행 위치 + 모드 전환 */}
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center rounded-md bg-blue-50 border border-blue-200/80 px-2 py-0.5 text-[11px] font-bold text-[#0B50E8]">
-                Q{filteredQuestions.length > 0 ? currentIndex + 1 : 0}.{' '}
+            <div className="flex items-center gap-2 text-xs font-semibold">
+              <span className="rounded-md bg-blue-50 text-blue-700 px-2 py-1">
+                질문 {filteredQuestions.length > 0 ? currentIndex + 1 : 0} /{' '}
+                {filteredQuestions.length}
+              </span>
+              <span className="text-slate-400">·</span>
+              <span className="text-slate-500 truncate max-w-[180px]">
                 {activeCategoryName}
               </span>
-
-              {activeQuestion?.memo && (
-                <button
-                  type="button"
-                  onClick={() => setShowHintMemo((v) => !v)}
-                  className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-semibold transition-colors cursor-pointer ${
-                    showHintMemo
-                      ? 'border-amber-200 bg-amber-50 text-amber-800'
-                      : 'border-slate-200 bg-white text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  <Lightbulb className="h-3 w-3 text-amber-500" />
-                  <span>답변 힌트 {showHintMemo ? '숨기기' : '보기'}</span>
-                </button>
-              )}
-
-              {activeQuestion && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (isInterviewerSpeaking) {
-                      stopSpeaking();
-                    } else {
-                      speakQuestionText(activeQuestion.content);
-                    }
-                  }}
-                  className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-semibold transition-colors cursor-pointer ${
-                    isInterviewerSpeaking
-                      ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
-                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  <Volume2 className="h-3 w-3 text-[#0B50E8]" />
-                  <span>
-                    {isInterviewerSpeaking ? '읽기 중지' : '질문 음성 듣기'}
-                  </span>
-                </button>
-              )}
             </div>
 
-            {/* 연습 모드 스위치: 내 화면 보며 연습 vs 실전 면접관 모드 */}
-            <div className="inline-flex items-center rounded-xl border border-slate-200 bg-slate-100/80 p-0.5">
+            <div className="inline-flex items-center rounded-xl border border-slate-200 bg-slate-100/80 p-1">
               <button
                 type="button"
                 onClick={() => handleChangeStudioMode('self')}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition-all cursor-pointer ${
+                disabled={isBusy}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all disabled:cursor-not-allowed ${
                   studioMode === 'self'
                     ? 'bg-white text-slate-900 shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
+                    : 'text-slate-500 hover:text-slate-900'
                 }`}
               >
-                <Camera className="h-3.5 w-3.5 text-[#0B50E8]" />
-                <span>내 화면 보며 연습</span>
+                <Camera className="h-3.5 w-3.5" />
+                <span>셀프 연습</span>
               </button>
               <button
                 type="button"
                 onClick={() => handleChangeStudioMode('interviewer')}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition-all cursor-pointer ${
+                disabled={isBusy}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all disabled:cursor-not-allowed ${
                   studioMode === 'interviewer'
-                    ? 'bg-[#0B50E8] text-white shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
+                    ? 'bg-blue-600 text-white shadow-2xs'
+                    : 'text-slate-500 hover:text-slate-900'
                 }`}
               >
                 <UserCheck className="h-3.5 w-3.5" />
-                <span>실전 면접관 모드</span>
+                <span>실전 면접관</span>
               </button>
             </div>
           </div>
 
-          {/* 질문 본문 & 힌트 메모 */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <h1 className="text-lg sm:text-[21px] font-extrabold text-slate-900 tracking-tight leading-snug break-keep">
-              {activeQuestion
-                ? activeQuestion.content
-                : '질문을 선택하거나 추가해 주세요'}
-            </h1>
+          {/* 질문 본문 */}
+          <h1 className="text-xl sm:text-2xl lg:text-[26px] font-bold text-slate-900 tracking-tight leading-snug break-keep">
+            {activeQuestion
+              ? activeQuestion.content
+              : '질문을 선택하거나 추가해 주세요'}
+          </h1>
 
-            {showHintMemo && activeQuestion?.memo && (
-              <div className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50/90 border border-amber-200/80 px-2.5 py-1 text-xs text-amber-900 shrink-0 max-w-md">
-                <Lightbulb className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-                <span className="truncate font-medium">
-                  {activeQuestion.memo}
-                </span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* 2. 중앙 비디오 스테이지: 남은 높이에 맞춰 자동 리사이즈 */}
-        <div className="flex-1 min-h-0 bg-slate-950/95 p-3 sm:p-4 flex items-center justify-center relative overflow-hidden">
-          <div
-            className={`relative w-full h-full max-w-[920px] aspect-video max-h-full overflow-hidden rounded-xl bg-slate-900 border shadow-lg transition-all ${
-              studioMode === 'interviewer' && isInterviewerSpeaking
-                ? 'border-emerald-400 ring-2 ring-emerald-400/40'
-                : 'border-slate-800'
-            }`}
-          >
-            {/* 실전 면접관 모드 레이어 */}
-            {studioMode === 'interviewer' && (
-              <div className="absolute inset-0 z-10 flex flex-col justify-between bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 select-none overflow-hidden">
-                {/* 우측 상단 플로팅 면접관 설정 바 (화면 밖 공간을 차지하지 않음!) */}
-                <div className="relative z-30 p-3 flex flex-wrap items-center justify-end gap-1.5 pointer-events-auto">
-                  <div className="inline-flex items-center gap-0.5 rounded-lg bg-black/60 backdrop-blur-xs border border-white/15 p-0.5">
-                    {INTERVIEWER_PERSONAS.map((persona) => (
-                      <button
-                        key={persona.id}
-                        type="button"
-                        onClick={() => setSelectedPersonaId(persona.id)}
-                        className={`rounded-md px-2 py-1 text-[11px] font-bold transition-colors cursor-pointer ${
-                          selectedPersonaId === persona.id
-                            ? 'bg-[#0B50E8] text-white'
-                            : 'text-slate-300 hover:text-white'
-                        }`}
-                      >
-                        {persona.name}
-                      </button>
-                    ))}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setTtsEnabled((v) => !v)}
-                    className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-[11px] font-semibold backdrop-blur-xs transition-colors cursor-pointer ${
-                      ttsEnabled
-                        ? 'border-blue-400/40 bg-blue-500/25 text-blue-200'
-                        : 'border-white/15 bg-black/60 text-slate-300 hover:text-white'
-                    }`}
-                    title="녹화 시작 시 면접관이 질문을 먼저 음성으로 읽어줍니다"
-                  >
-                    {ttsEnabled ? (
-                      <Volume2 className="h-3 w-3" />
-                    ) : (
-                      <VolumeX className="h-3 w-3" />
-                    )}
-                    <span>질문 자동 읽기: {ttsEnabled ? 'ON' : 'OFF'}</span>
-                  </button>
-
-                  <input
-                    ref={customVideoInputRef}
-                    type="file"
-                    accept="video/mp4,video/webm"
-                    onChange={handleUploadCustomVideo}
-                    className="hidden"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => customVideoInputRef.current?.click()}
-                    className="inline-flex items-center gap-1 rounded-lg border border-white/15 bg-black/60 hover:bg-black/80 backdrop-blur-xs px-2.5 py-1 text-[11px] font-semibold text-slate-200 transition-colors cursor-pointer"
-                  >
-                    <Upload className="h-3 w-3" />
-                    <span>
-                      {customVideoUrl ? '영상(.mp4) 변경' : '면접관 영상(.mp4)'}
-                    </span>
-                  </button>
-
-                  {customVideoUrl && (
-                    <button
-                      type="button"
-                      onClick={handleResetCustomVideo}
-                      className="inline-flex items-center gap-1 rounded-lg border border-white/15 bg-black/60 hover:bg-black/80 px-2 py-1 text-[11px] font-medium text-slate-300 cursor-pointer"
-                    >
-                      <RotateCcw className="h-3 w-3" />
-                      <span>초기화</span>
-                    </button>
-                  )}
-                </div>
-
-                {customVideoUrl ? (
-                  <video
-                    ref={interviewerVideoRef}
-                    src={customVideoUrl}
-                    autoPlay
-                    loop
-                    muted
-                    playsInline
-                    className="absolute inset-0 h-full w-full object-cover"
-                  />
-                ) : (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center p-4">
-                    <div
-                      className={`absolute w-80 h-80 rounded-full blur-3xl opacity-20 pointer-events-none transition-all duration-700 ${
-                        isInterviewerSpeaking
-                          ? 'bg-emerald-500 scale-110'
-                          : stage === 'recording'
-                          ? 'bg-blue-500 scale-105'
-                          : 'bg-slate-600'
-                      }`}
-                    />
-
-                    <div className="relative flex flex-col items-center">
-                      <div
-                        className={`relative flex items-center justify-center w-28 h-28 sm:w-36 sm:h-36 rounded-full border-4 transition-all duration-500 shadow-2xl ${
-                          isInterviewerSpeaking
-                            ? 'border-emerald-400 shadow-emerald-500/25 scale-[1.03]'
-                            : stage === 'recording'
-                            ? 'border-blue-400/80 shadow-blue-500/20'
-                            : 'border-slate-700'
-                        } bg-gradient-to-b from-slate-700 to-slate-800`}
-                      >
-                        <svg
-                          viewBox="0 0 120 120"
-                          className={`w-24 h-24 sm:w-32 sm:h-32 transition-transform duration-700 ${
-                            stage === 'recording' ? 'animate-pulse' : ''
-                          }`}
-                          fill="none"
-                        >
-                          <circle cx="60" cy="60" r="56" fill="#1E293B" />
-                          <path
-                            d="M20 112C24 88 40 78 60 78C80 78 96 88 100 112"
-                            fill="#0F172A"
-                          />
-                          <path d="M50 78L60 106L70 78H50Z" fill="#F8FAFC" />
-                          <path
-                            d="M58 84L60 78L62 84L61 106H59L58 84Z"
-                            fill={
-                              activePersona.id === 'tech-lead'
-                                ? '#2563EB'
-                                : '#059669'
-                            }
-                          />
-                          <rect
-                            x="52"
-                            y="64"
-                            width="16"
-                            height="16"
-                            rx="6"
-                            fill="#F1C27D"
-                          />
-                          <ellipse
-                            cx="60"
-                            cy="48"
-                            rx="20"
-                            ry="23"
-                            fill="#F5CBA7"
-                          />
-                          {activePersona.id === 'tech-lead' ? (
-                            <path
-                              d="M40 44C40 28 48 22 60 22C72 22 80 28 80 44C76 34 68 30 60 30C50 30 43 35 40 44Z"
-                              fill="#1E293B"
-                            />
-                          ) : (
-                            <path
-                              d="M38 52C38 28 47 21 60 21C73 21 82 28 82 52C79 36 71 30 60 30C49 30 41 36 38 52Z"
-                              fill="#0F172A"
-                            />
-                          )}
-                          {activePersona.id === 'tech-lead' && (
-                            <g stroke="#334155" strokeWidth="2">
-                              <rect
-                                x="45"
-                                y="43"
-                                width="11"
-                                height="8"
-                                rx="2"
-                                fill="#E2E8F0"
-                                fillOpacity="0.25"
-                              />
-                              <rect
-                                x="64"
-                                y="43"
-                                width="11"
-                                height="8"
-                                rx="2"
-                                fill="#E2E8F0"
-                                fillOpacity="0.25"
-                              />
-                              <line x1="56" y1="47" x2="64" y2="47" />
-                            </g>
-                          )}
-                          <circle cx="50.5" cy="47" r="2" fill="#0F172A" />
-                          <circle cx="69.5" cy="47" r="2" fill="#0F172A" />
-                          {isInterviewerSpeaking ? (
-                            <ellipse
-                              cx="60"
-                              cy="59"
-                              rx="4.5"
-                              ry="3"
-                              fill="#BE123C"
-                            />
-                          ) : (
-                            <path
-                              d="M54 58C56 60.5 64 60.5 66 58"
-                              stroke="#475569"
-                              strokeWidth="2.2"
-                              strokeLinecap="round"
-                            />
-                          )}
-                        </svg>
-
-                        {isInterviewerSpeaking && (
-                          <div className="absolute -bottom-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-500 px-3 py-0.5 text-[11px] font-bold text-white shadow-md">
-                            <span className="inline-flex items-end gap-0.5 h-3">
-                              <span className="w-0.5 h-full bg-white rounded-full animate-eq-1" />
-                              <span className="w-0.5 h-full bg-white rounded-full animate-eq-2" />
-                              <span className="w-0.5 h-full bg-white rounded-full animate-eq-3" />
-                              <span className="w-0.5 h-full bg-white rounded-full animate-eq-4" />
-                            </span>
-                            <span>질문 발화 중</span>
-                          </div>
-                        )}
-
-                        {!isInterviewerSpeaking && stage === 'recording' && (
-                          <div className="absolute -bottom-3 inline-flex items-center gap-1.5 rounded-full bg-[#0B50E8] px-3 py-0.5 text-[11px] font-bold text-white shadow-md">
-                            <span className="h-2 w-2 rounded-full bg-emerald-300 animate-ping" />
-                            <span>경청 및 평가 기록 중</span>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="mt-4 text-center space-y-0.5">
-                        <div className="inline-flex items-center gap-2">
-                          <span className="text-base font-bold text-white">
-                            {activePersona.name}
-                          </span>
-                          <span className="rounded-md bg-white/10 px-2 py-0.5 text-[10px] font-medium text-blue-300 border border-white/10">
-                            {activePersona.badge}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-slate-400">
-                          {activePersona.role}
-                        </p>
-                      </div>
-
-                      <div className="mt-3 max-w-md rounded-xl bg-white/5 border border-white/10 backdrop-blur-xs px-4 py-2 text-center">
-                        {isInterviewerSpeaking ? (
-                          <p className="text-xs font-medium text-emerald-300">
-                            &ldquo;{activeQuestion?.content}&rdquo;
-                          </p>
-                        ) : stage === 'recording' ? (
-                          <p className="text-xs font-medium text-slate-200">
-                            {listeningCueMessages[listeningCueIndex]}
-                          </p>
-                        ) : (
-                          <p className="text-xs text-slate-300">
-                            {activePersona.description}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {stage === 'prep' && (
-                  <div className="relative z-30 mt-auto p-3 flex items-center justify-center bg-gradient-to-t from-black/80 via-black/40 to-transparent">
-                    <div className="flex flex-wrap items-center gap-3 rounded-xl bg-slate-900/90 border border-emerald-400/40 px-4 py-2 text-white shadow-lg">
-                      <span className="text-xs font-medium text-emerald-300">
-                        면접관이 질문을 읽고 있습니다. 끝나면 자동으로 녹화가 시작됩니다.
-                      </span>
-                      <button
-                        type="button"
-                        onClick={handleSkipQuestionSpeech}
-                        className="inline-flex items-center gap-1 rounded-lg bg-emerald-500 hover:bg-emerald-600 px-3 py-1 text-xs font-bold text-white transition-colors cursor-pointer"
-                      >
-                        <SkipForward className="h-3.5 w-3.5" />
-                        <span>바로 답변 녹화 시작</span>
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* 내 웹캠 화면: 셀프 모드에서는 전체, 면접관 모드에서는 우측 하단 PIP */}
-            <div
-              className={
-                studioMode === 'interviewer'
-                  ? 'absolute bottom-3 right-3 z-20 w-36 sm:w-48 aspect-video rounded-xl overflow-hidden border-2 border-white/85 bg-slate-900 shadow-2xl transition-all'
-                  : 'relative w-full h-full'
-              }
-            >
-              <video
-                ref={videoRef}
-                autoPlay
-                muted
-                playsInline
-                className={`h-full w-full object-cover ${
-                  captureSource === 'camera' && mirrorVideo
-                    ? 'scale-x-[-1]'
-                    : ''
-                } ${isStreamReady ? 'block' : 'hidden'}`}
-              />
-
-              {!isStreamReady && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center p-3 text-center text-white/90 space-y-2 bg-slate-900">
-                  <AlertTriangle className="h-6 w-6 text-amber-400" />
-                  <p className="text-[11px] sm:text-xs font-medium max-w-md line-clamp-2">
-                    {deviceError || '카메라 연결 중...'}
-                  </p>
-                  {studioMode === 'self' && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        initMediaStream(
-                          selectedVideoId || undefined,
-                          selectedAudioId || undefined,
-                          captureSource
-                        )
-                      }
-                      className="rounded-lg bg-white/15 hover:bg-white/25 px-3 py-1.5 text-xs font-semibold text-white transition-colors"
-                    >
-                      카메라·마이크 다시 연결
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {studioMode === 'interviewer' && (
-                <div className="absolute bottom-1.5 left-2 right-2 flex items-center justify-between pointer-events-none">
-                  <span className="rounded bg-black/65 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                    지원자 (나)
-                  </span>
-                  <span
-                    className={`h-2 w-2 rounded-full ${
-                      micActive ? 'bg-emerald-400' : 'bg-white/40'
-                    }`}
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* 좌측 상단 상태 배지 */}
-            <div className="absolute top-3 left-3 z-30 flex flex-wrap items-center gap-2 pointer-events-none">
-              {stage === 'recording' ? (
-                <div className="inline-flex items-center gap-2 rounded-lg bg-red-600/90 backdrop-blur-xs px-3 py-1 text-xs font-bold text-white shadow-sm">
-                  <span className="h-2 w-2 rounded-full bg-white animate-pulse" />
-                  <span>REC 답변 녹화 중</span>
-                </div>
-              ) : stage === 'prep' ? (
-                <div className="inline-flex items-center gap-2 rounded-lg bg-emerald-600/90 backdrop-blur-xs px-3 py-1 text-xs font-bold text-white shadow-sm">
-                  <Sparkles className="h-3.5 w-3.5 animate-spin" />
-                  <span>면접관 질문 진행 중</span>
-                </div>
-              ) : stage === 'paused' ? (
-                <div className="inline-flex items-center gap-2 rounded-lg bg-amber-600/90 backdrop-blur-xs px-3 py-1 text-xs font-bold text-white shadow-sm">
-                  <span>일시정지됨</span>
-                </div>
-              ) : (
-                <div className="inline-flex items-center gap-2 rounded-lg bg-black/60 backdrop-blur-xs px-2.5 py-1 text-[11px] font-medium text-white">
-                  <span>
-                    {studioMode === 'interviewer'
-                      ? `실전 면접관 (${
-                          customVideoUrl ? '커스텀 영상' : activePersona.name
-                        })`
-                      : captureSource === 'screen'
-                      ? '화면 공유 미리보기'
-                      : '셀프 카메라 미리보기'}
-                  </span>
-                </div>
-              )}
-
-              {isOverLimit && stage === 'recording' && (
-                <div className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500/95 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm">
-                  <Clock className="h-3 w-3" />
-                  <span>제한 시간 경과</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* 3. 하단 통합 컨트롤 독 (기기 설정 · 메인 녹화 버튼 & 타이머 · 복기 바로가기) */}
-        <div className="px-5 py-3 border-t border-slate-100 bg-white flex flex-wrap items-center justify-between gap-3 shrink-0">
-          {/* 좌측: 기기 & 화면 컴팩트 셀렉터 */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            <div className="relative inline-flex items-center">
-              <Video className="h-3.5 w-3.5 text-slate-500 absolute left-2.5 pointer-events-none" />
-              <select
-                value={selectedVideoId}
-                onChange={(e) => {
-                  const vId = e.target.value;
-                  setSelectedVideoId(vId);
-                  setCaptureSource('camera');
-                  initMediaStream(vId, selectedAudioId || undefined, 'camera');
-                }}
-                disabled={
-                  stage === 'recording' ||
-                  stage === 'paused' ||
-                  stage === 'prep'
-                }
-                aria-label="카메라 선택"
-                className="h-9 appearance-none rounded-lg border border-slate-200 bg-slate-50/70 pl-8 pr-6 text-xs font-semibold text-slate-700 hover:bg-slate-100 focus:outline-none cursor-pointer max-w-[125px] truncate disabled:opacity-50"
-              >
-                {videoDevices.length === 0 ? (
-                  <option value="">카메라</option>
-                ) : (
-                  videoDevices.map((d, i) => (
-                    <option key={d.deviceId || i} value={d.deviceId}>
-                      {d.label ? d.label.slice(0, 10) : `카메라 ${i + 1}`}
-                    </option>
-                  ))
-                )}
-              </select>
-              <ChevronDown className="h-3 w-3 text-slate-400 absolute right-2 pointer-events-none" />
-            </div>
-
-            <div className="relative inline-flex items-center">
-              <Mic
-                className={`h-3.5 w-3.5 absolute left-2.5 pointer-events-none ${
-                  micActive ? 'text-emerald-600' : 'text-slate-500'
-                }`}
-              />
-              <select
-                value={selectedAudioId}
-                onChange={(e) => {
-                  const aId = e.target.value;
-                  setSelectedAudioId(aId);
-                  initMediaStream(
-                    selectedVideoId || undefined,
-                    aId,
-                    captureSource
-                  );
-                }}
-                disabled={
-                  stage === 'recording' ||
-                  stage === 'paused' ||
-                  stage === 'prep'
-                }
-                aria-label="마이크 선택"
-                className="h-9 appearance-none rounded-lg border border-slate-200 bg-slate-50/70 pl-8 pr-6 text-xs font-semibold text-slate-700 hover:bg-slate-100 focus:outline-none cursor-pointer max-w-[125px] truncate disabled:opacity-50"
-              >
-                {audioDevices.length === 0 ? (
-                  <option value="">마이크</option>
-                ) : (
-                  audioDevices.map((d, i) => (
-                    <option key={d.deviceId || i} value={d.deviceId}>
-                      {d.label ? d.label.slice(0, 10) : `마이크 ${i + 1}`}
-                    </option>
-                  ))
-                )}
-              </select>
-              <ChevronDown className="h-3 w-3 text-slate-400 absolute right-2 pointer-events-none" />
-            </div>
-
-            <div className="relative inline-flex items-center">
-              <Monitor className="h-3.5 w-3.5 text-slate-500 absolute left-2.5 pointer-events-none" />
-              <select
-                value={
-                  captureSource === 'screen'
-                    ? 'screen'
-                    : mirrorVideo
-                    ? 'camera-mirror'
-                    : 'camera-normal'
-                }
-                onChange={(e) => {
-                  const val = e.target.value;
-                  if (val === 'screen') {
-                    setCaptureSource('screen');
-                    initMediaStream(
-                      selectedVideoId || undefined,
-                      selectedAudioId || undefined,
-                      'screen'
-                    );
-                  } else if (val === 'camera-mirror') {
-                    setMirrorVideo(true);
-                    if (captureSource !== 'camera') {
-                      setCaptureSource('camera');
-                      initMediaStream(
-                        selectedVideoId || undefined,
-                        selectedAudioId || undefined,
-                        'camera'
-                      );
-                    }
+          {/* 보조 액션 */}
+          {activeQuestion && (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (isInterviewerSpeaking) {
+                    stopSpeaking();
                   } else {
-                    setMirrorVideo(false);
-                    if (captureSource !== 'camera') {
-                      setCaptureSource('camera');
-                      initMediaStream(
-                        selectedVideoId || undefined,
-                        selectedAudioId || undefined,
-                        'camera'
-                      );
-                    }
+                    speakQuestionText(activeQuestion.content);
                   }
                 }}
-                disabled={
-                  stage === 'recording' ||
-                  stage === 'paused' ||
-                  stage === 'prep'
-                }
-                aria-label="화면 모드"
-                className="h-9 appearance-none rounded-lg border border-slate-200 bg-slate-50/70 pl-8 pr-6 text-xs font-semibold text-slate-700 hover:bg-slate-100 focus:outline-none cursor-pointer disabled:opacity-50"
+                disabled={isBusy && stage !== 'prep'}
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50 ${
+                  isInterviewerSpeaking
+                    ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
               >
-                <option value="camera-mirror">거울 모드</option>
-                <option value="camera-normal">반전 해제</option>
-                <option value="screen">화면 공유</option>
-              </select>
-              <ChevronDown className="h-3 w-3 text-slate-400 absolute right-2 pointer-events-none" />
-            </div>
-          </div>
+                <Volume2 className="h-3.5 w-3.5" />
+                <span>{isInterviewerSpeaking ? '읽기 중지' : '질문 듣기'}</span>
+              </button>
 
-          {/* 중앙: 메인 녹화 컨트롤 & 타이머 */}
-          <div className="flex items-center gap-3">
+              {activeQuestion.memo && (
+                <button
+                  type="button"
+                  onClick={() => setShowKeywordMemo((v) => !v)}
+                  className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    showKeywordMemo
+                      ? 'border-amber-300 bg-amber-50 text-amber-700'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <Lightbulb className="h-3.5 w-3.5" />
+                  <span>{showKeywordMemo ? '키워드 숨기기' : '답변 키워드 보기'}</span>
+                </button>
+              )}
+
+              {previousRecordingsForCurrent.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigate(`/records?questionId=${activeQuestion.id}`)
+                  }
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50/60 hover:border-blue-200 transition-colors"
+                >
+                  <Play className="h-3 w-3 fill-current" />
+                  <span>이전 녹화 {previousRecordingsForCurrent.length}개 보기</span>
+                </button>
+              )}
+            </div>
+          )}
+
+          {showKeywordMemo && activeQuestion?.memo && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-900 leading-relaxed animate-fade-in-up">
+              {activeQuestion.memo}
+            </div>
+          )}
+        </div>
+
+        {/* 진행 단계 표시 */}
+        <ol className="flex items-center gap-2 px-1">
+          {STEPS.map((label, i) => {
+            const done = i < stepIndex;
+            const current = i === stepIndex;
+            return (
+              <li key={label} className="flex items-center gap-2 flex-1 min-w-0">
+                <span
+                  className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold transition-colors ${
+                    done
+                      ? 'bg-emerald-500 text-white'
+                      : current
+                      ? 'bg-blue-600 text-white ring-4 ring-blue-100'
+                      : 'bg-slate-200 text-slate-500'
+                  }`}
+                >
+                  {done ? <Check className="h-3 w-3 stroke-[3]" /> : i + 1}
+                </span>
+                <span
+                  className={`text-xs font-semibold truncate ${
+                    current ? 'text-slate-900' : 'text-slate-400'
+                  }`}
+                >
+                  {label}
+                </span>
+                {i < STEPS.length - 1 && (
+                  <span
+                    className={`h-[2px] flex-1 rounded-full ${
+                      done ? 'bg-emerald-400' : 'bg-slate-200'
+                    }`}
+                  />
+                )}
+              </li>
+            );
+          })}
+        </ol>
+
+            {/* 메인 비디오 스테이지: 셀프 모드 & 실전 면접관 모드 겸용 */}
+            <div
+              className={`relative aspect-video w-full overflow-hidden rounded-2xl bg-slate-950 border shadow-xs transition-all ${
+                studioMode === 'interviewer' && isInterviewerSpeaking
+                  ? 'border-emerald-400 ring-2 ring-emerald-400/40'
+                  : 'border-slate-200'
+              }`}
+            >
+              {/* 실전 면접관 모드일 때 배경 전체를 채우는 면접관 뷰 */}
+              {studioMode === 'interviewer' && (
+                <div className="absolute inset-0 z-10 flex flex-col justify-between bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 select-none overflow-hidden">
+                  {customVideoUrl ? (
+                    <video
+                      ref={interviewerVideoRef}
+                      src={customVideoUrl}
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                      className="absolute inset-0 h-full w-full object-cover"
+                    />
+                  ) : (
+                    /* 기본 내장 AI 면접관 화상 스튜디오 뷰 */
+                    <div className="absolute inset-0 flex flex-col items-center justify-center p-6">
+                      {/* 배경 오피스 조명 연출 */}
+                      <div
+                        className={`absolute w-96 h-96 rounded-full blur-3xl opacity-20 pointer-events-none transition-all duration-700 ${
+                          isInterviewerSpeaking
+                            ? 'bg-emerald-500 scale-110'
+                            : stage === 'recording'
+                            ? 'bg-blue-500 scale-105'
+                            : 'bg-slate-600'
+                        }`}
+                      />
+
+                      {/* 면접관 아바타 및 정장 실루엣 */}
+                      <div className="relative flex flex-col items-center">
+                        <div
+                          className={`relative flex items-center justify-center w-32 h-32 sm:w-40 sm:h-40 rounded-full border-4 transition-all duration-500 shadow-2xl ${
+                            isInterviewerSpeaking
+                              ? 'border-emerald-400 shadow-emerald-500/25 scale-[1.03]'
+                              : stage === 'recording'
+                              ? 'border-blue-400/80 shadow-blue-500/20'
+                              : 'border-slate-700'
+                          } bg-gradient-to-b from-slate-700 to-slate-800`}
+                        >
+                          {/* 정장 면접관 일러스트 SVG */}
+                          <svg
+                            viewBox="0 0 120 120"
+                            className={`w-28 h-28 sm:w-36 sm:h-36 transition-transform duration-700 ${
+                              stage === 'recording' ? 'animate-pulse' : ''
+                            }`}
+                            fill="none"
+                          >
+                            {/* 배경 원 */}
+                            <circle cx="60" cy="60" r="56" fill="#1E293B" />
+                            {/* 정장 자켓 어깨 */}
+                            <path
+                              d="M20 112C24 88 40 78 60 78C80 78 96 88 100 112"
+                              fill="#0F172A"
+                            />
+                            {/* 셔츠 & 넥타이 */}
+                            <path d="M50 78L60 106L70 78H50Z" fill="#F8FAFC" />
+                            <path
+                              d="M58 84L60 78L62 84L61 106H59L58 84Z"
+                              fill={
+                                activePersona.id === 'tech-lead'
+                                  ? '#2563EB'
+                                  : '#059669'
+                              }
+                            />
+                            {/* 목 */}
+                            <rect
+                              x="52"
+                              y="64"
+                              width="16"
+                              height="16"
+                              rx="6"
+                              fill="#F1C27D"
+                            />
+                            {/* 얼굴 */}
+                            <ellipse
+                              cx="60"
+                              cy="48"
+                              rx="20"
+                              ry="23"
+                              fill="#F5CBA7"
+                            />
+                            {/* 헤어 스타일 */}
+                            {activePersona.id === 'tech-lead' ? (
+                              <path
+                                d="M40 44C40 28 48 22 60 22C72 22 80 28 80 44C76 34 68 30 60 30C50 30 43 35 40 44Z"
+                                fill="#1E293B"
+                              />
+                            ) : (
+                              <path
+                                d="M38 52C38 28 47 21 60 21C73 21 82 28 82 52C79 36 71 30 60 30C49 30 41 36 38 52Z"
+                                fill="#0F172A"
+                              />
+                            )}
+                            {/* 안경 (기술 면접관) */}
+                            {activePersona.id === 'tech-lead' && (
+                              <g stroke="#334155" strokeWidth="2">
+                                <rect
+                                  x="45"
+                                  y="43"
+                                  width="11"
+                                  height="8"
+                                  rx="2"
+                                  fill="#E2E8F0"
+                                  fillOpacity="0.25"
+                                />
+                                <rect
+                                  x="64"
+                                  y="43"
+                                  width="11"
+                                  height="8"
+                                  rx="2"
+                                  fill="#E2E8F0"
+                                  fillOpacity="0.25"
+                                />
+                                <line x1="56" y1="47" x2="64" y2="47" />
+                              </g>
+                            )}
+                            {/* 눈 */}
+                            <circle cx="50.5" cy="47" r="2" fill="#0F172A" />
+                            <circle cx="69.5" cy="47" r="2" fill="#0F172A" />
+                            {/* 입 모양 (말할 때 vs 경청할 때) */}
+                            {isInterviewerSpeaking ? (
+                              <ellipse
+                                cx="60"
+                                cy="59"
+                                rx="4.5"
+                                ry="3"
+                                fill="#BE123C"
+                              />
+                            ) : (
+                              <path
+                                d="M54 58C56 60.5 64 60.5 66 58"
+                                stroke="#475569"
+                                strokeWidth="2.2"
+                                strokeLinecap="round"
+                              />
+                            )}
+                          </svg>
+
+                          {/* 음성 파형 뱃지 (면접관 발화 시) */}
+                          {isInterviewerSpeaking && (
+                            <div className="absolute -bottom-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-500 px-3 py-1 text-[11px] font-bold text-white shadow-md">
+                              <span className="inline-flex items-end gap-0.5 h-3">
+                                <span className="w-0.5 h-full bg-white rounded-full animate-eq-1" />
+                                <span className="w-0.5 h-full bg-white rounded-full animate-eq-2" />
+                                <span className="w-0.5 h-full bg-white rounded-full animate-eq-3" />
+                                <span className="w-0.5 h-full bg-white rounded-full animate-eq-4" />
+                              </span>
+                              <span>질문 발화 중</span>
+                            </div>
+                          )}
+
+                          {/* 경청 뱃지 (지원자 답변 녹화 중일 때) */}
+                          {!isInterviewerSpeaking && stage === 'recording' && (
+                            <div className="absolute -bottom-3 inline-flex items-center gap-1.5 rounded-full bg-blue-600 px-3 py-1 text-[11px] font-bold text-white shadow-md">
+                              <span className="h-2 w-2 rounded-full bg-emerald-300 animate-ping" />
+                              <span>경청 및 평가 기록 중</span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="mt-5 text-center space-y-1">
+                          <div className="inline-flex items-center gap-2">
+                            <span className="text-base sm:text-lg font-bold text-white">
+                              {activePersona.name}
+                            </span>
+                            <span className="rounded-md bg-white/10 px-2 py-0.5 text-[11px] font-medium text-blue-300 border border-white/10">
+                              {activePersona.badge}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-400">
+                            {activePersona.role}
+                          </p>
+                        </div>
+
+                        {/* 상태별 안내 캡션 */}
+                        <div className="mt-4 max-w-md rounded-xl bg-white/5 border border-white/10 backdrop-blur-xs px-4 py-2.5 text-center">
+                          {isInterviewerSpeaking ? (
+                            <p className="text-xs sm:text-sm font-medium text-emerald-300">
+                              &ldquo;{activeQuestion?.content}&rdquo;
+                            </p>
+                          ) : stage === 'recording' ? (
+                            <p className="text-xs font-medium text-slate-200">
+                              {listeningCueMessages[listeningCueIndex]}
+                            </p>
+                          ) : (
+                            <p className="text-xs text-slate-300">
+                              {activePersona.description}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 면접관 질문 중일 때 바로 답변 시작(건너뛰기) 오버레이 버튼 */}
+                  {stage === 'prep' && (
+                    <div className="relative z-30 mt-auto p-4 flex items-center justify-center bg-gradient-to-t from-black/80 via-black/40 to-transparent">
+                      <div className="flex flex-wrap items-center gap-3 rounded-xl bg-slate-900/90 border border-emerald-400/40 px-4 py-2.5 text-white shadow-lg">
+                        <span className="text-xs font-medium text-emerald-300">
+                          면접관이 질문을 읽고 있습니다. 끝나면 자동으로 녹화가 시작됩니다.
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleSkipQuestionSpeech}
+                          className="inline-flex items-center gap-1 rounded-lg bg-emerald-500 hover:bg-emerald-600 px-3 py-1 text-xs font-bold text-white transition-colors"
+                        >
+                          <SkipForward className="h-3.5 w-3.5" />
+                          <span>바로 답변 녹화 시작</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 내 카메라 스트림: 셀프 모드에서는 전체 화면, 면접관 모드에서는 우측 하단 PIP */}
+              <div
+                className={
+                  studioMode === 'interviewer'
+                    ? 'absolute bottom-3.5 right-3.5 z-20 w-40 sm:w-52 aspect-video rounded-xl overflow-hidden border-2 border-white/85 bg-slate-900 shadow-2xl transition-all'
+                    : 'relative w-full h-full'
+                }
+              >
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  muted
+                  playsInline
+                  className={`h-full w-full object-cover ${
+                    captureSource === 'camera' && mirrorVideo
+                      ? 'scale-x-[-1]'
+                      : ''
+                  } ${isStreamReady ? 'block' : 'hidden'}`}
+                />
+
+                {!isStreamReady && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center p-3 text-center text-white/90 space-y-2 bg-slate-900">
+                    <AlertTriangle className="h-6 w-6 text-amber-400" />
+                    <p className="text-[11px] sm:text-xs font-medium max-w-md line-clamp-2">
+                      {deviceError || '카메라 연결 중...'}
+                    </p>
+                    {studioMode === 'self' && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          initMediaStream(
+                            selectedVideoId || undefined,
+                            selectedAudioId || undefined,
+                            captureSource
+                          )
+                        }
+                        className="rounded-lg bg-white/15 hover:bg-white/25 px-3 py-1.5 text-xs font-semibold text-white transition-colors"
+                      >
+                        카메라·마이크 다시 연결
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {studioMode === 'interviewer' && (
+                  <div className="absolute bottom-1.5 left-2 right-2 flex items-center justify-between pointer-events-none">
+                    <span className="rounded bg-black/65 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                      지원자 (나)
+                    </span>
+                    <span
+                      className={`h-2 w-2 rounded-full ${
+                        micActive ? 'bg-emerald-400' : 'bg-white/40'
+                      }`}
+                      title="마이크 입력 감지"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* 좌측 상단 상태 배지 */}
+              <div className="absolute top-4 left-4 z-30 flex flex-wrap items-center gap-2">
+                {stage === 'recording' ? (
+                  <div className="inline-flex items-center gap-2 rounded-lg bg-red-600/90 backdrop-blur-xs px-3 py-1.5 text-xs font-bold text-white shadow-sm">
+                    <span className="h-2 w-2 rounded-full bg-white animate-pulse" />
+                    <span>REC 답변 녹화 중</span>
+                  </div>
+                ) : stage === 'prep' ? (
+                  <div className="inline-flex items-center gap-2 rounded-lg bg-emerald-600/90 backdrop-blur-xs px-3 py-1.5 text-xs font-bold text-white shadow-sm">
+                    <Sparkles className="h-3.5 w-3.5 animate-spin" />
+                    <span>면접관 질문 진행 중</span>
+                  </div>
+                ) : stage === 'paused' ? (
+                  <div className="inline-flex items-center gap-2 rounded-lg bg-amber-600/90 backdrop-blur-xs px-3 py-1.5 text-xs font-bold text-white shadow-sm">
+                    <span>일시정지됨</span>
+                  </div>
+                ) : (
+                  <div className="inline-flex items-center gap-2 rounded-lg bg-black/55 backdrop-blur-xs px-3 py-1.5 text-xs font-medium text-white">
+                    <span>
+                      {studioMode === 'interviewer'
+                        ? `실전 면접관 모드 (${
+                            customVideoUrl ? '커스텀 영상' : activePersona.name
+                          })`
+                        : captureSource === 'screen'
+                        ? '화면 공유 미리보기'
+                        : '셀프 카메라 미리보기'}
+                    </span>
+                  </div>
+                )}
+
+                {isOverLimit && stage === 'recording' && (
+                  <div className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500/95 px-3 py-1.5 text-xs font-semibold text-white shadow-sm">
+                    <Clock className="h-3.5 w-3.5" />
+                    <span>제한 시간 경과 (계속 녹화 중)</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+        {/* 녹화 컨트롤 바 */}
+        <div className="rounded-2xl border border-slate-200/90 bg-white shadow-xs px-4 sm:px-5 py-3.5 flex flex-wrap items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={handlePrevQuestion}
+            disabled={currentIndex <= 0 || isBusy || stage === 'saving'}
+            className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 h-10 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+          >
+            <ChevronLeft className="h-4 w-4" />
+            <span className="hidden sm:inline">이전</span>
+          </button>
+
+          <div className="flex items-center gap-3 mx-auto">
+            <div className="text-right">
+              <div
+                className={`text-2xl font-bold font-mono tracking-tight leading-none ${
+                  isOverLimit ? 'text-red-600' : 'text-slate-900'
+                }`}
+              >
+                {formatDuration(elapsedSeconds)}
+              </div>
+              <div className="text-[10px] font-medium text-slate-400 mt-1">
+                {answerLimitSeconds > 0
+                  ? `제한 ${formatDuration(answerLimitSeconds)}`
+                  : '제한 없음'}
+              </div>
+            </div>
+
             {stage === 'recording' || stage === 'paused' ? (
-              <div className="flex items-center gap-2">
+              <>
                 <button
                   type="button"
                   onClick={handleStopRecording}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 hover:bg-red-700 active:scale-[0.98] px-6 h-10 text-sm font-bold text-white shadow-sm transition-all cursor-pointer"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 hover:bg-red-700 active:scale-[0.98] px-6 h-11 text-sm font-bold text-white shadow-sm transition-all"
                 >
                   <Square className="h-3.5 w-3.5 fill-current" />
                   <span>녹화 종료</span>
@@ -1699,7 +1654,7 @@ export function PracticeStudioPage() {
                 <button
                   type="button"
                   onClick={handleTogglePause}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 px-3.5 h-10 text-xs font-semibold text-slate-700 transition-colors cursor-pointer"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 px-3.5 h-11 text-xs font-semibold text-slate-700 transition-colors"
                 >
                   {stage === 'paused' ? (
                     <>
@@ -1713,13 +1668,13 @@ export function PracticeStudioPage() {
                     </>
                   )}
                 </button>
-              </div>
+              </>
             ) : stage === 'prep' ? (
-              <div className="flex items-center gap-2">
+              <>
                 <button
                   type="button"
                   onClick={handleSkipQuestionSpeech}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-5 h-10 text-sm font-bold text-white shadow-sm transition-colors cursor-pointer"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] px-5 h-11 text-sm font-bold text-white shadow-sm transition-all"
                 >
                   <SkipForward className="h-4 w-4" />
                   <span>바로 답변 시작</span>
@@ -1727,96 +1682,374 @@ export function PracticeStudioPage() {
                 <button
                   type="button"
                   onClick={handleStopRecording}
-                  className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white hover:bg-slate-50 px-3 h-10 text-xs font-semibold text-slate-700 transition-colors cursor-pointer"
+                  className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white hover:bg-slate-50 px-3.5 h-11 text-xs font-semibold text-slate-700 transition-colors"
                 >
                   취소
                 </button>
-              </div>
+              </>
             ) : (
               <button
                 type="button"
                 onClick={handleStartRecording}
                 disabled={!activeQuestion || stage === 'saving'}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#0B50E8] hover:bg-[#0942C2] active:scale-[0.98] disabled:opacity-50 px-7 h-10 text-sm font-bold text-white shadow-sm transition-all cursor-pointer"
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-[0.98] disabled:opacity-50 px-7 h-11 text-sm font-bold text-white shadow-[0_6px_16px_rgba(37,99,235,0.28)] transition-all"
               >
-                <span className="h-2.5 w-2.5 rounded-full bg-white" />
+                <span className="h-2.5 w-2.5 rounded-full bg-red-400 ring-2 ring-white" />
                 <span>
-                  {studioMode === 'interviewer' && ttsEnabled
-                    ? '면접 시작 (질문 듣고 녹화)'
-                    : '답변 녹화 시작'}
+                  {stage === 'saving'
+                    ? '저장 중...'
+                    : stage === 'saved'
+                    ? '다시 녹화하기'
+                    : studioMode === 'interviewer' && ttsEnabled
+                    ? '면접 시작'
+                    : '녹화 시작'}
                 </span>
               </button>
             )}
+          </div>
 
-            <div className="flex items-center gap-1.5 rounded-xl bg-slate-100/90 px-3 py-1.5">
+          <button
+            type="button"
+            onClick={handleNextQuestion}
+            disabled={!activeQuestion || isBusy || stage === 'saving'}
+            className="inline-flex items-center gap-1 rounded-xl bg-slate-900 hover:bg-slate-800 px-3.5 h-10 text-xs font-semibold text-white disabled:opacity-40 disabled:pointer-events-none transition-colors"
+          >
+            <span className="hidden sm:inline">
+              {currentIndex >= filteredQuestions.length - 1 ? '기록 보기' : '다음'}
+            </span>
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* 저장 완료 안내 */}
+        {stage === 'saved' && activeQuestion && (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 flex flex-wrap items-center justify-between gap-3 animate-fade-in-up">
+            <div className="flex items-center gap-2.5">
+              <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+              <div>
+                <p className="text-sm font-bold text-emerald-900">
+                  답변이 저장되었습니다
+                </p>
+                <p className="text-xs text-emerald-700">
+                  바로 영상을 보며 바꿀 점을 메모하거나, 다음 질문으로 넘어가세요.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(`/records?questionId=${activeQuestion.id}`)
+                }
+                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3.5 py-2 text-xs font-bold text-white transition-colors"
+              >
+                영상 복기하기
+              </button>
+              {currentIndex < filteredQuestions.length - 1 && (
+                <button
+                  type="button"
+                  onClick={handleNextQuestion}
+                  className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-white hover:bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-700 transition-colors"
+                >
+                  다음 질문
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        <p className="hidden md:flex items-center justify-center gap-3 text-[11px] text-slate-400 font-medium">
+          <Keyboard className="h-3.5 w-3.5" />
+          <span>
+            <kbd className="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-slate-600">Space</kbd>{' '}
+            녹화 시작/종료
+          </span>
+          <span>
+            <kbd className="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-slate-600">←</kbd>{' '}
+            <kbd className="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-slate-600">→</kbd>{' '}
+            질문 이동
+          </span>
+        </p>
+      </section>
+
+      {/* ───────── 우측: 설정 패널 ───────── */}
+      <aside className="space-y-4 lg:col-start-2 xl:col-start-auto xl:sticky xl:top-20">
+        {/* 장치 설정 */}
+        <div className="rounded-2xl border border-slate-200/90 bg-white shadow-xs p-4 space-y-3.5">
+          <div className="flex items-center justify-between">
+            <h3 className="inline-flex items-center gap-1.5 text-sm font-bold text-slate-900">
+              <SlidersHorizontal className="h-4 w-4 text-blue-600" />
+              녹화 설정
+            </h3>
+            <span
+              className={`inline-flex items-center gap-1 text-[11px] font-semibold ${
+                isStreamReady ? 'text-emerald-600' : 'text-amber-600'
+              }`}
+            >
               <span
-                className={`text-base font-extrabold font-mono tracking-tight ${
-                  isOverLimit
-                    ? 'text-red-600'
-                    : stage === 'recording'
-                    ? 'text-[#0B50E8]'
-                    : 'text-slate-800'
+                className={`h-1.5 w-1.5 rounded-full ${
+                  isStreamReady ? 'bg-emerald-500' : 'bg-amber-500'
                 }`}
-              >
-                {formatDuration(elapsedSeconds)}
-              </span>
+              />
+              {isStreamReady ? '장치 연결됨' : '연결 대기'}
+            </span>
+          </div>
 
+          <label className="block space-y-1">
+            <span className="text-[11px] font-semibold text-slate-500">카메라</span>
+            <div className="relative">
+              <Video className="h-3.5 w-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <select
-                value={answerLimitSeconds}
-                onChange={(e) => setAnswerLimitSeconds(Number(e.target.value))}
-                title="답변 제한 시간 설정"
-                className="bg-transparent text-[11px] font-semibold text-slate-500 hover:text-slate-800 focus:outline-none cursor-pointer"
+                value={selectedVideoId}
+                onChange={(e) => {
+                  const vId = e.target.value;
+                  setSelectedVideoId(vId);
+                  setCaptureSource('camera');
+                  initMediaStream(vId, selectedAudioId || undefined, 'camera');
+                }}
+                disabled={isBusy}
+                className="w-full h-9 appearance-none rounded-lg border border-slate-200 bg-white pl-8 pr-7 text-xs font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-600 truncate disabled:opacity-50"
               >
-                <option value={0}>/ 제한 없음</option>
-                <option value={60}>/ 1분 제한</option>
-                <option value={120}>/ 2분 제한</option>
-                <option value={180}>/ 3분 제한</option>
+                {videoDevices.length === 0 ? (
+                  <option value="">기본 카메라</option>
+                ) : (
+                  videoDevices.map((d, i) => (
+                    <option key={d.deviceId || i} value={d.deviceId}>
+                      {d.label || `카메라 ${i + 1}`}
+                    </option>
+                  ))
+                )}
               </select>
+              <ChevronDown className="h-3.5 w-3.5 text-slate-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
+          </label>
+
+          <label className="block space-y-1">
+            <span className="flex items-center justify-between text-[11px] font-semibold text-slate-500">
+              <span>마이크</span>
+              <span className="inline-flex items-end gap-0.5 h-3" title="입력 감지">
+                {[0, 1, 2, 3].map((b) => (
+                  <span
+                    key={b}
+                    className={`w-1 rounded-full transition-all duration-150 ${
+                      micActive ? 'bg-emerald-500' : 'bg-slate-200'
+                    }`}
+                    style={{ height: micActive ? `${40 + b * 20}%` : '35%' }}
+                  />
+                ))}
+              </span>
+            </span>
+            <div className="relative">
+              <Mic className="h-3.5 w-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <select
+                value={selectedAudioId}
+                onChange={(e) => {
+                  const aId = e.target.value;
+                  setSelectedAudioId(aId);
+                  initMediaStream(selectedVideoId || undefined, aId, captureSource);
+                }}
+                disabled={isBusy}
+                className="w-full h-9 appearance-none rounded-lg border border-slate-200 bg-white pl-8 pr-7 text-xs font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-600 truncate disabled:opacity-50"
+              >
+                {audioDevices.length === 0 ? (
+                  <option value="">기본 마이크</option>
+                ) : (
+                  audioDevices.map((d, i) => (
+                    <option key={d.deviceId || i} value={d.deviceId}>
+                      {d.label || `마이크 ${i + 1}`}
+                    </option>
+                  ))
+                )}
+              </select>
+              <ChevronDown className="h-3.5 w-3.5 text-slate-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
+          </label>
+
+          <div className="space-y-1">
+            <span className="text-[11px] font-semibold text-slate-500">화면</span>
+            <div className="grid grid-cols-3 gap-1 rounded-lg bg-slate-100 p-1">
+              {(
+                [
+                  { key: 'camera-mirror', label: '거울' },
+                  { key: 'camera-normal', label: '원본' },
+                  { key: 'screen', label: '화면공유' },
+                ] as const
+              ).map((opt) => {
+                const current =
+                  captureSource === 'screen'
+                    ? 'screen'
+                    : mirrorVideo
+                    ? 'camera-mirror'
+                    : 'camera-normal';
+                const active = current === opt.key;
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    disabled={isBusy}
+                    onClick={() => {
+                      if (opt.key === 'screen') {
+                        setCaptureSource('screen');
+                        initMediaStream(
+                          selectedVideoId || undefined,
+                          selectedAudioId || undefined,
+                          'screen'
+                        );
+                        return;
+                      }
+                      setMirrorVideo(opt.key === 'camera-mirror');
+                      if (captureSource !== 'camera') {
+                        setCaptureSource('camera');
+                        initMediaStream(
+                          selectedVideoId || undefined,
+                          selectedAudioId || undefined,
+                          'camera'
+                        );
+                      }
+                    }}
+                    className={`rounded-md py-1.5 text-[11px] font-semibold transition-all disabled:opacity-50 ${
+                      active
+                        ? 'bg-white text-slate-900 shadow-2xs'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          {/* 우측: 복기 바로가기 & 다음 질문 */}
-          <div className="flex items-center gap-2">
-            {stage === 'saved' && activeQuestion ? (
-              <button
-                type="button"
-                onClick={() =>
-                  navigate(`/records?questionId=${activeQuestion.id}`)
-                }
-                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-3.5 h-9 text-xs font-bold text-white shadow-xs transition-colors cursor-pointer"
-              >
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                <span>방금 녹화본 복기하기 →</span>
-              </button>
-            ) : previousRecordingsForCurrent.length > 0 && activeQuestion ? (
-              <button
-                type="button"
-                onClick={() =>
-                  navigate(`/records?questionId=${activeQuestion.id}`)
-                }
-                className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50/70 hover:bg-blue-100/80 px-3 h-9 text-xs font-bold text-[#0B50E8] transition-colors cursor-pointer"
-              >
-                <Play className="h-3 w-3 fill-current" />
-                <span>이전 녹화 {previousRecordingsForCurrent.length}개 복기</span>
-              </button>
-            ) : null}
+          <div className="space-y-1">
+            <span className="text-[11px] font-semibold text-slate-500">답변 제한 시간</span>
+            <div className="grid grid-cols-5 gap-1 rounded-lg bg-slate-100 p-1">
+              {[0, 60, 120, 180, 300].map((sec) => (
+                <button
+                  key={sec}
+                  type="button"
+                  onClick={() => setAnswerLimitSeconds(sec)}
+                  className={`rounded-md py-1.5 text-[11px] font-semibold transition-all ${
+                    answerLimitSeconds === sec
+                      ? 'bg-white text-slate-900 shadow-2xs'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  {sec === 0 ? '없음' : `${sec / 60}분`}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* 면접관 설정 (실전 모드) */}
+        {studioMode === 'interviewer' ? (
+          <div className="rounded-2xl border border-blue-200/80 bg-white shadow-xs p-4 space-y-3.5 animate-fade-in-up">
+            <h3 className="inline-flex items-center gap-1.5 text-sm font-bold text-slate-900">
+              <UserCheck className="h-4 w-4 text-blue-600" />
+              면접관 설정
+            </h3>
+
+            <div className="space-y-1.5">
+              {INTERVIEWER_PERSONAS.map((persona) => {
+                const active = selectedPersonaId === persona.id;
+                return (
+                  <button
+                    key={persona.id}
+                    type="button"
+                    disabled={isBusy}
+                    onClick={() => setSelectedPersonaId(persona.id)}
+                    className={`w-full text-left rounded-xl border px-3 py-2.5 transition-all disabled:opacity-60 ${
+                      active
+                        ? 'border-blue-500 bg-blue-50/70 ring-1 ring-blue-500'
+                        : 'border-slate-200 bg-white hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-slate-900">
+                        {persona.name}
+                      </span>
+                      <span className="text-[10px] font-semibold text-blue-600">
+                        {persona.badge}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">
+                      {persona.description}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
 
             <button
               type="button"
-              onClick={handleNextQuestion}
-              disabled={!activeQuestion || stage === 'saving'}
-              className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 px-3.5 h-9 text-xs font-bold text-slate-700 disabled:opacity-40 transition-colors cursor-pointer"
+              onClick={() => setTtsEnabled((v) => !v)}
+              className="w-full flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2.5 hover:bg-slate-50 transition-colors"
             >
-              <span>
-                {currentIndex >= filteredQuestions.length - 1
-                  ? '기록 페이지로'
-                  : '다음 질문'}
+              <span className="text-left">
+                <span className="block text-xs font-semibold text-slate-800">
+                  녹화 전 질문 읽어주기
+                </span>
+                <span className="block text-[10px] text-slate-500">
+                  끝나면 자동으로 녹화가 시작돼요
+                </span>
               </span>
-              <ChevronRight className="h-3.5 w-3.5" />
+              <span
+                className={`relative h-5 w-9 rounded-full transition-colors ${
+                  ttsEnabled ? 'bg-blue-600' : 'bg-slate-300'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
+                    ttsEnabled ? 'left-[18px]' : 'left-0.5'
+                  }`}
+                />
+              </span>
             </button>
+
+            <input
+              ref={customVideoInputRef}
+              type="file"
+              accept="video/mp4,video/webm"
+              onChange={handleUploadCustomVideo}
+              className="hidden"
+            />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => customVideoInputRef.current?.click()}
+                className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 bg-slate-50 hover:bg-white hover:border-blue-300 px-2.5 py-2 text-[11px] font-semibold text-slate-600 transition-colors"
+                title="HeyGen, D-ID 등으로 만든 면접관 루프 영상(.mp4)"
+              >
+                <Upload className="h-3.5 w-3.5" />
+                {customVideoUrl ? '면접관 영상 변경' : '면접관 영상 넣기'}
+              </button>
+              {customVideoUrl && (
+                <button
+                  type="button"
+                  onClick={handleResetCustomVideo}
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 px-2.5 py-2 text-[11px] font-medium text-slate-500"
+                  title="기본 아바타로 되돌리기"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-      </section>
+        ) : (
+          <div className="rounded-2xl border border-slate-200/90 bg-gradient-to-br from-white to-blue-50/60 shadow-xs p-4 space-y-2">
+            <h3 className="inline-flex items-center gap-1.5 text-sm font-bold text-slate-900">
+              <Lightbulb className="h-4 w-4 text-amber-500" />
+              셀프 연습 팁
+            </h3>
+            <ul className="space-y-1.5 text-xs text-slate-600 leading-relaxed">
+              <li>• 결론을 먼저 말하고 근거를 2~3개로 정리해 보세요.</li>
+              <li>• 화면 속 내 눈이 아니라 카메라 렌즈를 바라보세요.</li>
+              <li>• 실제처럼 연습하려면 <b className="text-blue-600">실전 면접관</b> 모드를 써보세요.</li>
+            </ul>
+          </div>
+        )}
+      </aside>
 
       <QuickQuestionModal
         open={isQuickAddOpen}

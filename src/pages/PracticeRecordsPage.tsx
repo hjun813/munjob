@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
   Plus,
-  Check,
+  CheckCircle2,
   ChevronLeft,
-  ChevronRight,
   ChevronDown,
   RotateCcw,
   Trash2,
@@ -96,6 +95,7 @@ export function PracticeRecordsPage() {
     data?.feedbackByRecording || new Map<string, SelfFeedback>();
 
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('all');
+  const [isCategoryMenuOpen, setIsCategoryMenuOpen] = useState(false);
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
   const [activeQuestionId, setActiveQuestionId] = useState<string>(
     queryQuestionId || ''
@@ -161,15 +161,15 @@ export function PracticeRecordsPage() {
   const activeQuestion = filteredQuestions[currentIndex] || null;
 
   const activeCategoryName = useMemo(() => {
-    if (activeQuestion) {
-      return (
-        categories.find((c) => c.id === activeQuestion.categoryId)?.name ||
-        '백엔드 기술 면접'
-      );
-    }
     if (selectedCategoryId !== 'all') {
       return (
         categories.find((c) => c.id === selectedCategoryId)?.name ||
+        '백엔드 기술 면접'
+      );
+    }
+    if (activeQuestion) {
+      return (
+        categories.find((c) => c.id === activeQuestion.categoryId)?.name ||
         '백엔드 기술 면접'
       );
     }
@@ -258,19 +258,6 @@ export function PracticeRecordsPage() {
     setSearchParams({ questionId: qId });
   };
 
-  const handlePrevQuestion = () => {
-    if (currentIndex <= 0) return;
-    const prevQ = filteredQuestions[currentIndex - 1];
-    if (prevQ) handleSelectQuestion(prevQ.id);
-  };
-
-  const handleNextQuestion = () => {
-    if (currentIndex < filteredQuestions.length - 1) {
-      const nextQ = filteredQuestions[currentIndex + 1];
-      if (nextQ) handleSelectQuestion(nextQ.id);
-    }
-  };
-
   const handleAddTimestampMemo = () => {
     const currentSec = Math.floor(playerRef.current?.getCurrentTime() || 0);
     const newMemo: TimestampMemo = {
@@ -342,58 +329,24 @@ export function PracticeRecordsPage() {
   const avgScore = calculateAverageScore(scores);
 
   return (
-    <div className="flex flex-col lg:flex-row gap-3.5 items-stretch lg:h-[calc(100vh-5.2rem)]">
-      {/* 좌측: 질문 목록 & 카테고리 필터 */}
-      <aside className="w-full lg:w-[275px] shrink-0 rounded-2xl border border-slate-200/90 bg-white shadow-2xs flex flex-col overflow-hidden max-h-[300px] lg:max-h-none">
-        <div className="p-3.5 border-b border-slate-100 space-y-2.5 bg-slate-50/50">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5">
-              <h2 className="text-sm font-extrabold text-slate-900 tracking-tight">
-                질문 목록
-              </h2>
-              <span className="rounded-md bg-blue-50 px-1.5 py-0.5 text-[11px] font-bold text-[#0B50E8]">
-                {filteredQuestions.length > 0 ? currentIndex + 1 : 0}/
-                {filteredQuestions.length}
-              </span>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setIsQuickAddOpen(true)}
-              className="inline-flex items-center gap-1 rounded-lg bg-[#0B50E8] hover:bg-[#0942C2] px-2.5 py-1 text-[11px] font-bold text-white transition-colors cursor-pointer"
-            >
-              <Plus className="h-3 w-3" />
-              <span>추가</span>
-            </button>
-          </div>
-
-          <div className="relative">
-            <select
-              value={selectedCategoryId}
-              onChange={(e) => setSelectedCategoryId(e.target.value)}
-              aria-label="카테고리 필터"
-              className="w-full h-8 appearance-none rounded-lg border border-slate-200 bg-white pl-2.5 pr-7 text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#0B50E8] cursor-pointer"
-            >
-              <option value="all">
-                전체 면접 질문 ({allQuestions.length}개)
-              </option>
-              {categories.map((cat) => {
-                const count = allQuestions.filter(
-                  (q) => q.categoryId === cat.id
-                ).length;
-                return (
-                  <option key={cat.id} value={cat.id}>
-                    {cat.name} ({count}개)
-                  </option>
-                );
-              })}
-            </select>
-            <ChevronDown className="h-3.5 w-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-          </div>
+    <div className="flex flex-col lg:flex-row gap-5 items-stretch min-h-[calc(100vh-7rem)]">
+      <aside className="w-full lg:w-[290px] shrink-0 rounded-2xl border border-slate-200/90 bg-white shadow-xs flex flex-col overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+          <h2 className="text-[17px] font-bold text-slate-900 tracking-tight">
+            질문 목록
+          </h2>
+          <button
+            type="button"
+            onClick={() => setIsQuickAddOpen(true)}
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span>추가</span>
+          </button>
         </div>
 
         <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
-          {filteredQuestions.map((q, idx) => {
+          {filteredQuestions.map((q) => {
             const isSelected = q.id === activeQuestion?.id;
             const recCount = recordingsByQuestion.get(q.id)?.length || 0;
             const displayLabel = q.shortTitle || q.content;
@@ -403,117 +356,92 @@ export function PracticeRecordsPage() {
                 key={q.id}
                 type="button"
                 onClick={() => handleSelectQuestion(q.id)}
-                className={`w-full text-left px-3.5 py-2.5 flex items-center justify-between gap-2 transition-colors border-l-[3.5px] cursor-pointer ${
+                className={`w-full text-left px-4 py-3.5 flex items-center gap-2.5 transition-colors border-l-[3.5px] ${
                   isSelected
-                    ? 'bg-[#EEF4FF] border-l-[#0B50E8] text-slate-900 font-bold'
+                    ? 'bg-[#EEF4FF] border-l-blue-600 text-slate-900 font-semibold'
                     : 'bg-white border-l-transparent text-slate-700 hover:bg-slate-50 font-medium'
                 }`}
               >
-                <span className="text-[12.5px] truncate">
-                  {idx + 1}. {displayLabel}
-                </span>
                 {recCount > 0 && (
-                  <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 shrink-0">
-                    <Check className="h-2.5 w-2.5 stroke-[3]" />
-                    {recCount}
-                  </span>
+                  <CheckCircle2 className="h-4 w-4 text-white fill-emerald-500 shrink-0" />
                 )}
+                <span className="text-[13.5px] truncate">{displayLabel}</span>
               </button>
             );
           })}
         </div>
-
-        <div className="p-2.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={handlePrevQuestion}
-            disabled={currentIndex <= 0}
-            className="flex-1 inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 transition-colors cursor-pointer"
-          >
-            <ChevronLeft className="h-3.5 w-3.5" />
-            <span>이전 질문</span>
-          </button>
-          <button
-            type="button"
-            onClick={handleNextQuestion}
-            disabled={currentIndex >= filteredQuestions.length - 1}
-            className="flex-1 inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 transition-colors cursor-pointer"
-          >
-            <span>다음 질문</span>
-            <ChevronRight className="h-3.5 w-3.5" />
-          </button>
-        </div>
       </aside>
 
-      {/* 우측: 영상 복기 플레이어 & 타임스탬프 피드백 노트 */}
-      <section className="flex-1 min-w-0 rounded-2xl border border-slate-200/90 bg-white shadow-2xs flex flex-col overflow-hidden">
-        {/* 상단 질문 타이틀 & 시도 회차 선택 바 */}
-        <div className="px-5 py-3.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 shrink-0">
-          <div className="space-y-1 min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center rounded-md bg-blue-50 border border-blue-200/80 px-2 py-0.5 text-[11px] font-bold text-[#0B50E8]">
-                Q{filteredQuestions.length > 0 ? currentIndex + 1 : 0}.{' '}
-                {activeCategoryName}
-              </span>
-              {activeRecording && (
-                <span className="text-xs font-medium text-slate-400">
-                  녹화 일시: {formatMonthDayTime(activeRecording.recordedAt)}
-                </span>
-              )}
-            </div>
-            <h1 className="text-lg sm:text-[21px] font-extrabold text-slate-900 tracking-tight leading-snug break-keep">
-              {activeQuestion
-                ? activeQuestion.content
-                : '질문을 선택해 주세요'}
-            </h1>
-          </div>
+      <section className="flex-1 rounded-2xl border border-slate-200/90 bg-white shadow-xs flex flex-col overflow-hidden">
+        <div className="px-7 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+          <div className="relative flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsCategoryMenuOpen((v) => !v)}
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-700 hover:text-slate-900 transition-colors"
+            >
+              <ChevronLeft className="h-4 w-4 text-slate-400" />
+              <span>{activeCategoryName}</span>
+              <ChevronDown className="h-3.5 w-3.5 text-slate-400 ml-0.5" />
+            </button>
 
-          {/* 시도 회차 탭 & 다시 녹화 버튼 */}
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            {attempts.length > 0 && (
-              <div className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-100/80 p-1">
-                {attempts.map((att, idx) => {
-                  const isCurrent = att.id === activeRecording?.id;
+            {isCategoryMenuOpen && (
+              <div className="absolute left-0 top-8 z-30 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedCategoryId('all');
+                    setIsCategoryMenuOpen(false);
+                  }}
+                  className={`w-full text-left rounded-lg px-3 py-2 text-xs font-medium ${
+                    selectedCategoryId === 'all'
+                      ? 'bg-blue-50 text-blue-700 font-semibold'
+                      : 'text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  전체 면접 질문 ({allQuestions.length})
+                </button>
+                {categories.map((cat) => {
+                  const count = allQuestions.filter(
+                    (q) => q.categoryId === cat.id
+                  ).length;
                   return (
                     <button
-                      key={att.id}
+                      key={cat.id}
                       type="button"
-                      onClick={() => setSelectedRecordingId(att.id)}
-                      className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-all cursor-pointer ${
-                        isCurrent
-                          ? 'bg-[#0B50E8] text-white shadow-2xs'
-                          : 'text-slate-600 hover:text-slate-900'
+                      onClick={() => {
+                        setSelectedCategoryId(cat.id);
+                        setIsCategoryMenuOpen(false);
+                      }}
+                      className={`w-full text-left rounded-lg px-3 py-2 text-xs font-medium ${
+                        selectedCategoryId === cat.id
+                          ? 'bg-blue-50 text-blue-700 font-semibold'
+                          : 'text-slate-700 hover:bg-slate-50'
                       }`}
                     >
-                      시도 {idx + 1}
+                      {cat.name} ({count})
                     </button>
                   );
                 })}
               </div>
             )}
+          </div>
 
-            <button
-              type="button"
-              onClick={() =>
-                navigate(
-                  activeQuestion
-                    ? `/studio?questionId=${activeQuestion.id}`
-                    : '/studio'
-                )
-              }
-              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 px-3.5 py-2 text-xs font-bold text-slate-700 shadow-2xs transition-colors cursor-pointer"
-            >
-              <RotateCcw className="h-3.5 w-3.5 text-[#0B50E8]" />
-              <span>다시 녹화</span>
-            </button>
+          <div className="text-sm font-medium text-slate-500">
+            질문 {filteredQuestions.length > 0 ? currentIndex + 1 : 0} /{' '}
+            {filteredQuestions.length}
           </div>
         </div>
 
-        {/* 본문: 좌측 영상 플레이어 (7) + 우측 피드백 메모장 (5) */}
-        <div className="flex-1 min-h-0 p-4 sm:p-5 overflow-y-auto">
-          <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 h-full items-stretch">
-            {/* 영상 플레이어 영역 */}
-            <div className="xl:col-span-7 flex flex-col justify-center">
+        <div className="p-7 space-y-6 flex-1">
+          <h1 className="text-2xl sm:text-[26px] font-bold text-slate-900 tracking-tight leading-snug break-keep">
+            {activeQuestion
+              ? activeQuestion.content
+              : '질문을 선택해 주세요'}
+          </h1>
+
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+            <div className="xl:col-span-7 space-y-4">
               <VideoPlayer
                 ref={playerRef}
                 blob={activeRecording?.videoBlob || null}
@@ -530,26 +458,87 @@ export function PracticeRecordsPage() {
                     : undefined
                 }
               />
+
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  {attempts.length > 0 ? (
+                    <>
+                      <div
+                        role="tablist"
+                        aria-label="시도 회차 선택"
+                        className="inline-flex items-center gap-1 rounded-xl bg-slate-100 p-1"
+                      >
+                        {attempts.map((att, idx) => {
+                          const isActiveAttempt = att.id === activeRecording?.id;
+                          const hasFeedback = feedbackByRecording.has(att.id);
+                          return (
+                            <button
+                              key={att.id}
+                              type="button"
+                              role="tab"
+                              aria-selected={isActiveAttempt}
+                              onClick={() => setSelectedRecordingId(att.id)}
+                              className={`relative rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${
+                                isActiveAttempt
+                                  ? 'bg-white text-slate-900 shadow-2xs'
+                                  : 'text-slate-500 hover:text-slate-800'
+                              }`}
+                              title={formatMonthDayTime(att.recordedAt)}
+                            >
+                              시도 {idx + 1}
+                              {hasFeedback && (
+                                <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-slate-100" />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <span className="text-xs font-medium text-slate-500">
+                        {formatMonthDayTime(activeRecording?.recordedAt)}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-xs font-medium text-slate-400">
+                      아직 녹화된 시도가 없습니다
+                    </span>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigate(
+                      activeQuestion
+                        ? `/studio?questionId=${activeQuestion.id}`
+                        : '/studio'
+                    )
+                  }
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 px-4 py-2 text-xs font-semibold text-slate-700 shadow-2xs transition-colors"
+                >
+                  <RotateCcw className="h-3.5 w-3.5 text-slate-600" />
+                  <span>다시 녹화</span>
+                </button>
+              </div>
             </div>
 
-            {/* 우측 피드백 메모장 */}
-            <div className="xl:col-span-5 rounded-2xl border border-slate-200 bg-slate-50/40 flex flex-col justify-between overflow-hidden shadow-2xs">
-              <div className="flex-1 min-h-0 flex flex-col">
-                <div className="px-4 py-3 border-b border-slate-200/80 bg-white flex items-center justify-between gap-2 shrink-0">
-                  <h3 className="text-sm font-extrabold text-slate-900">
-                    타임스탬프 피드백 메모
+            <div className="xl:col-span-5 rounded-2xl border border-slate-200 bg-white flex flex-col justify-between min-h-[410px] shadow-2xs">
+              <div>
+                <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-2">
+                  <h3 className="text-base font-bold text-slate-900">
+                    피드백 메모
                   </h3>
                   <button
                     type="button"
                     onClick={handleAddTimestampMemo}
-                    className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50/70 hover:bg-blue-100 px-2.5 py-1 text-xs font-bold text-[#0B50E8] transition-colors cursor-pointer"
+                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 transition-colors"
                   >
                     <Plus className="h-3.5 w-3.5" />
                     <span>현재 시간에 메모</span>
                   </button>
                 </div>
 
-                <div className="flex-1 p-3.5 space-y-2 overflow-y-auto max-h-[240px]">
+                <div className="p-4 space-y-2.5 max-h-[220px] overflow-y-auto">
                   {timestampMemos.length === 0 ? (
                     <div className="py-8 text-center">
                       <p className="text-xs text-slate-400">
@@ -565,7 +554,7 @@ export function PracticeRecordsPage() {
                         <button
                           type="button"
                           onClick={() => playerRef.current?.seekTo(memo.time)}
-                          className="rounded-md bg-[#EEF4FF] hover:bg-blue-100 px-2.5 py-1.5 text-xs font-mono font-bold text-[#0B50E8] transition-colors shrink-0 cursor-pointer"
+                          className="rounded-md bg-[#EEF4FF] hover:bg-blue-100 px-2.5 py-1.5 text-xs font-mono font-bold text-blue-600 transition-colors shrink-0"
                           title="클릭하여 해당 시간으로 이동"
                         >
                           {formatDuration(memo.time)}
@@ -578,16 +567,16 @@ export function PracticeRecordsPage() {
                             handleUpdateTimestampMemo(memo.id, e.target.value)
                           }
                           placeholder="이 구간의 피드백 메모 입력..."
-                          className="flex-1 h-8 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B50E8]"
+                          className="flex-1 h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600"
                         />
 
                         <button
                           type="button"
                           onClick={() => handleDeleteTimestampMemo(memo.id)}
-                          className="p-1 text-slate-400 hover:text-red-500 rounded-md hover:bg-slate-100 transition-colors shrink-0 cursor-pointer"
+                          className="p-1.5 text-slate-400 hover:text-red-500 rounded-md hover:bg-slate-100 transition-colors shrink-0"
                           title="메모 삭제"
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
+                          <Trash2 className="h-4 w-4" />
                         </button>
                       </div>
                     ))
@@ -595,27 +584,26 @@ export function PracticeRecordsPage() {
                 </div>
               </div>
 
-              {/* 하단: 5점 척도 자가진단 & 다음 답변에서 바꿀 점 */}
-              <div className="p-3.5 border-t border-slate-200/80 bg-white space-y-2.5 shrink-0">
+              <div className="p-4 border-t border-slate-100 space-y-3">
                 <div className="space-y-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowDetailedScores((v) => !v)}
-                    className="w-full flex items-center justify-between text-xs font-bold text-slate-700 hover:text-slate-900 cursor-pointer"
-                  >
-                    <span className="inline-flex items-center gap-1.5">
-                      <SlidersHorizontal className="h-3.5 w-3.5 text-[#0B50E8]" />
+                  <div className="flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={() => setShowDetailedScores((v) => !v)}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900"
+                    >
+                      <SlidersHorizontal className="h-3.5 w-3.5 text-blue-600" />
                       <span>5점 척도 자가진단 (평균 ★ {avgScore})</span>
-                    </span>
-                    <ChevronDown
-                      className={`h-3.5 w-3.5 transition-transform ${
-                        showDetailedScores ? 'rotate-180' : ''
-                      }`}
-                    />
-                  </button>
+                      <ChevronDown
+                        className={`h-3.5 w-3.5 transition-transform ${
+                          showDetailedScores ? 'rotate-180' : ''
+                        }`}
+                      />
+                    </button>
+                  </div>
 
                   {showDetailedScores && (
-                    <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-2.5 space-y-1.5">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 space-y-2">
                       {COMPACT_METRICS.map((m) => {
                         const val = scores[m.key];
                         return (
@@ -626,7 +614,7 @@ export function PracticeRecordsPage() {
                             <span className="font-medium text-slate-700">
                               {m.label}
                             </span>
-                            <div className="flex items-center gap-0.5">
+                            <div className="flex items-center gap-1">
                               {[1, 2, 3, 4, 5].map((pt) => (
                                 <button
                                   key={pt}
@@ -637,7 +625,7 @@ export function PracticeRecordsPage() {
                                       [m.key]: pt,
                                     }))
                                   }
-                                  className="p-0.5 cursor-pointer"
+                                  className="p-0.5"
                                 >
                                   <Star
                                     className={`h-3.5 w-3.5 ${
@@ -657,17 +645,17 @@ export function PracticeRecordsPage() {
                 </div>
 
                 <textarea
-                  rows={2}
+                  rows={3}
                   value={improvements}
                   onChange={(e) => setImprovements(e.target.value)}
-                  placeholder="다음 답변에서 바꿀 점을 적어보세요"
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white p-2.5 text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B50E8] resize-none"
+                  placeholder="다음 답변에서 바꿀 점"
+                  className="w-full rounded-xl border border-slate-200 bg-white p-3 text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600 resize-none"
                 />
 
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between pt-0.5">
                   <div>
                     {saveToast && (
-                      <span className="text-xs font-bold text-emerald-600">
+                      <span className="text-xs font-semibold text-emerald-600">
                         ✓ {saveToast}
                       </span>
                     )}
@@ -675,7 +663,7 @@ export function PracticeRecordsPage() {
                   <button
                     type="button"
                     onClick={handleSaveMemos}
-                    className="rounded-xl bg-[#0B50E8] hover:bg-[#0942C2] active:scale-[0.98] px-4 py-2 text-xs font-bold text-white shadow-xs transition-all cursor-pointer"
+                    className="rounded-xl bg-blue-600 hover:bg-blue-700 px-4 py-2 text-xs font-bold text-white shadow-xs transition-colors"
                   >
                     메모 저장
                   </button>
